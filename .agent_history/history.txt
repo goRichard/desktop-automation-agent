@@ -1,0 +1,677 @@
+
+# 2026-06-10 13:57:17.843630
++打开calculator 并计算 23 * 17
+
+# 2026-06-10 13:58:11.843625
++/exit
+
+# 2026-06-10 14:31:22.437788
++打开calculator 并计算 23 * 17
+
+# 2026-06-10 14:33:10.723395
++/exit
+
+# 2026-06-10 16:15:01.636616
++打开calculator 并计算 23 * 17
+
+# 2026-06-10 16:16:50.498409
++/exit
+
+# 2026-06-10 16:17:15.142786
++打开calculator 并计算 23 * 17
+
+# 2026-06-10 16:19:11.320350
++打开onenote ，新建一个 section, 新建一个 page, 然后写入 this is message from desktop agent
+
+# 2026-06-10 17:54:58.899512
++打开calculator 等待10秒 并关闭
+
+# 2026-06-10 17:56:09.846506
++每2分钟执行一次
+
+# 2026-06-11 08:27:16.410542
++Hi
+
+# 2026-06-11 08:36:45.366605
++/ext
+
+# 2026-06-11 08:36:47.515561
++/exit
+
+# 2026-06-11 13:03:38.469395
++打开calculator
+
+# 2026-06-11 13:04:30.774607
++用计算器计算 23 * 17
+
+# 2026-06-11 13:06:55.116958
++打开浏览器，访问bilibili
+
+# 2026-06-11 14:35:11.820669
++/help
+
+# 2026-06-11 14:35:31.029349
++移动鼠标到 cc switch
+
+# 2026-06-15 16:24:28.571651
++打开计算器
+
+# 2026-06-15 16:25:40.861445
++在onenote中添加新的一个section
+
+# 2026-06-16 09:20:23.306086
++截图
+
+# 2026-06-16 09:23:03.433383
++打开计算器，输入123+456，保存结果
+
+# 2026-06-16 11:12:56.209067
++/exit
+
+# 2026-06-16 11:13:43.425352
++打开当前会议的麦克风
+
+# 2026-06-16 11:22:50.619934
++打开计算器并计算23 + 12
+
+# 2026-06-16 12:49:57.859085
++/exit
+
+# 2026-06-16 13:03:35.941466
++打开计算器并计算23 + 12
+
+# 2026-06-16 14:25:50.911475
++打开计算器并点击2
+
+# 2026-06-17 13:31:48.403554
++请分析"记事本"窗口的内容，告诉我里面写了什么
+
+# 2026-06-17 13:35:54.111697
++/exit
+
+# 2026-06-17 13:36:08.676071
++请分析"记事本"窗口的内容，告诉我里面写了什么
+
+# 2026-06-17 13:40:43.193748
++在记事本窗口找到"文件"菜单并点击它
+
+# 2026-06-17 13:42:29.639078
++/exit
+
+# 2026-06-17 14:43:01.165409
++打开计算器并点击2
+
+# 2026-06-17 14:44:07.786293
++关闭teams
+
+# 2026-06-17 14:44:32.115501
++关闭apifox
+
+# 2026-06-17 14:44:42.153436
++打开apifox
+
+# 2026-06-17 14:46:39.896644
++调试 APIFOX中在AIDA下的qwen3.5-35B 的 GET 请求 list-models 接口
+
+# 2026-06-17 14:50:19.759851
++点击APIfox的自动化测试
+
+# 2026-06-17 15:10:11.173115
++/exit
+
+# 2026-06-17 15:22:59.934914
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-17 15:35:57.715686
++/exit
+
+# 2026-06-17 15:56:20.763705
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/LDM-Home 并点击 Master Data
+
+# 2026-06-17 16:07:43.845435
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/LDM-Home
+
+# 2026-06-17 16:16:59.945100
++打开edge 浏览器
+
+# 2026-06-17 16:34:20.231714
++打开onenote ，新建一个 section, 新建一个 page, 然后写入 this is message from desktop agent
+
+# 2026-06-17 16:40:46.038674
++/exit
+
+# 2026-06-17 16:42:05.380857
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/Home-META_MDM_TABLE_INFO 然后点击 MDM_SAP_MRPCONTROLLER 之后下载到本地目录
+
+# 2026-06-17 16:43:20.269568
++好了，我已经点击进去了
+
+# 2026-06-17 16:46:30.271582
++/exit
+
+# 2026-06-17 16:48:36.259073
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/Home-META_MDM_TABLE_INFO 然后点击 MDM_SAP_MRPCONTROLLER 之后下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi
+
+# 2026-06-17 16:49:32.311250
++好了，我已经点击进去了
+
+# 2026-06-17 17:17:53.831191
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/Home-META_MDM_TABLE_INFO 然后点击 MDM_SAP_MRPCONTROLLER 之后下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi
+
+# 2026-06-17 17:19:34.739340
++已经登录好了
+
+# 2026-06-17 17:20:47.299323
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/1_MDM_SAP_MRPCONTROLLER 并下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi
+
+# 2026-06-17 17:21:37.437760
++我已经登录了
+
+# 2026-06-17 18:55:50.508325
++/exit
+
+# 2026-06-17 18:58:24.151103
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/1_MDM_SAP_MRPCONTROLLER 并下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi
+
+# 2026-06-17 18:59:24.879371
++好了
+
+# 2026-06-17 19:01:37.437445
++将onenote 中收藏夹的 cao gang 的最新的文本信息收集过后，通过outlook 发送给 cao.gang.ext@siemens.com， 需要通过窗口实现，不能够写python 代码
+
+# 2026-06-17 19:02:09.583833
++将 teams  中收藏夹的 cao gang 的最新的文本信息收集过后，通过outlook 发送给 cao.gang.ext@siemens.com， 需要通过窗口实现，不能够写python 代码
+
+# 2026-06-17 19:17:51.660602
++/exit
+
+# 2026-06-17 19:32:20.615047
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/1_MDM_SAP_MRPCONTROLLER 并下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi, 不能使用python脚本进行发送
+
+# 2026-06-17 19:33:13.337254
++已经登录成功了
+
+# 2026-06-17 19:56:05.621242
++/exit
+
+# 2026-06-17 19:58:33.243652
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/1_MDM_SAP_MRPCONTROLLER 并下载到本地目录，将下载过后的文档作为附件并通过outlook 发送给 xiao-dong.chen@siemens.com, subject 为 123, body 为 Hi, 不能使用python脚本进行发送
+
+# 2026-06-17 20:07:17.496868
++/exit
+
+# 2026-06-17 20:07:42.374254
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-17 20:10:10.144573
++将下载文件夹中最新的文件作为附件，通过outlook 发送给 cao.gang.ext@siemens.com   subject: test test, 正文： 你好123
+
+# 2026-06-17 20:28:59.668291
++将下载文件夹中最新的文件作为附件，通过outlook 发送给 cao.gang.ext@siemens.com   subject: test test, 正文： 你好123， 不能使用python
+
+# 2026-06-18 08:53:48.272656
++open browswer and visit https://bilibili.com and search siemens, play the first search result
+
+# 2026-06-18 08:58:17.437377
++/exit
+
+# 2026-06-18 09:14:21.316746
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-18 09:19:29.451775
++/exit
+
+# 2026-06-18 09:57:48.068580
++将下载文件夹中最新的文件作为附件，通过outlook 发送给 cao.gang.ext@siemens.com   subject: test test, 正文： 你好123， 不能使用python
+
+# 2026-06-18 11:30:08.583634
++/exit
+
+# 2026-06-18 11:32:05.431652
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/5_MDM_EXL_PRODUCTGROUPBAS 并下载，然后通过outlook 发送给 xiao-dong.chen@siemens.com，subject 为 test test, 正文为 desktop agent operation
+
+# 2026-06-18 11:33:33.391676
++我已经完成登录了，你可以继续
+
+# 2026-06-18 11:37:38.883752
++访问 https://sewc-hzg.siemens.com.cn/mdm-p/5_MDM_EXL_PRODUCTGROUPBAS 并下载，然后通过outlook 发送给 xiao-dong.chen@siemens.com，subject 为 test test, 正文为 desktop agent operation
+
+# 2026-06-18 11:38:24.289796
++我已经完成登录了，你可以继续
+
+# 2026-06-18 11:47:18.486990
++将下载目录中的 _MDM_EXL_PRODUCTGROUPBAS_NONSCM_Product Group basic Master Data  for PU_QM_BE etc.xlsx 作为附件通过outlook 发送给 xiao-dong.chen@siemens.com，subject 为 test test, 正文为 desktop agent operation
+
+# 2026-06-18 13:00:52.999157
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-18 13:02:07.785080
++将下载目录中的 _MDM_EXL_PRODUCTGROUPBAS_NONSCM_Product Group basic Master Data  for PU_QM_BE etc.xlsx 作为附件通过outlook 发送给 xiao-dong.chen@siemens.com，subject 为 test test, 正文为 desktop agent operation
+
+# 2026-06-18 13:09:04.596060
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-18 13:35:57.895356
++/exit
+
+# 2026-06-22 09:39:09.991977
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-22 10:25:54.639139
++
++
++
++
++
++/
+
+# 2026-06-22 10:25:59.004005
++/exit
+
+# 2026-06-22 11:06:01.647827
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-22 11:52:37.184732
++下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 13:08:21.012453
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-22 13:16:48.707606
++下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 13:41:48.582776
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:28:36.584632
++/exit
+
+# 2026-06-22 14:29:43.321139
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:35:08.945602
++/exit
+
+# 2026-06-22 14:35:20.586597
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:40:52.549660
++/exit
+
+# 2026-06-22 14:40:59.924396
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:41:44.940830
++直接执行吧
+
+# 2026-06-22 14:42:54.580717
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:43:22.949494
++开始
+
+# 2026-06-22 14:44:05.981330
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:44:31.766414
++可以
+
+# 2026-06-22 14:51:06.195406
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 14:58:15.807007
++可以的
+
+# 2026-06-22 15:07:49.726311
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 15:08:23.861502
++日期最新，直接发送
+
+# 2026-06-22 15:18:42.893005
++将下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 15:22:50.989750
++将用户z00490ns下的下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-22 17:01:24.106225
++好的
+
+# 2026-06-22 17:02:40.102519
++将用户z00490ns下的下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-23 15:58:46.664811
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-24 11:15:52.441105
++是
+
+# 2026-06-24 11:44:01.890249
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-24 11:55:51.934479
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-24 11:58:15.793247
++是
+
+# 2026-06-24 17:00:17.114164
++/exit
+
+# 2026-06-24 17:00:40.987357
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-24 20:39:24.605800
++/exit
+
+# 2026-06-24 22:09:05.114853
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 10:10:21.665141
++y
+
+# 2026-06-25 10:10:51.584544
++CC 不需要，确认就是这个PDF
+
+# 2026-06-25 10:19:48.879942
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 10:21:09.216208
++y
+
+# 2026-06-25 10:22:24.837705
++正确，正确，正确，CC不填，确认（最新的修改时间）
+
+# 2026-06-25 10:32:44.206194
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 10:33:03.417766
++y
+
+# 2026-06-25 10:33:49.384346
++按照时间，最新； 是Downloads
+
+# 2026-06-25 10:37:09.834726
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-25 13:26:22.220811
++给 xiao-dong.chen@siemens.com  发送邮件, subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 13:27:28.438892
++y
+
+# 2026-06-25 13:30:10.535067
++/exot
+
+# 2026-06-25 13:30:12.378891
++/exit
+
+# 2026-06-25 13:31:17.674098
++给 xiao-dong.chen@siemens.com  发送邮件, subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 13:31:30.274164
++y
+
+# 2026-06-25 13:32:29.647032
++没有激活窗口
+
+# 2026-06-25 13:54:27.568460
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 13:55:24.433453
++y
+
+# 2026-06-25 13:56:32.143743
++LastWriteTime（最近修改时间）升序
+
+# 2026-06-25 13:58:32.431037
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 13:58:51.313489
++y
+
+# 2026-06-25 13:59:05.450571
++确认
+
+# 2026-06-25 14:19:41.491209
++打开计算器 然后通过鼠标点击计算  23 + 12
+
+# 2026-06-25 14:26:48.011794
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 14:27:02.073754
++y
+
+# 2026-06-25 14:27:27.921504
++确认
+
+# 2026-06-25 14:30:03.202646
++不发送
+
+# 2026-06-25 16:57:59.957390
++/eixt
+
+# 2026-06-25 16:58:01.823689
++/exit
+
+# 2026-06-25 16:59:22.498851
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-25 16:59:46.127519
++y
+
+# 2026-06-25 17:00:51.016613
++/exit
+
+# 2026-06-25 23:37:25.356570
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 08:55:50.013136
++y
+
+# 2026-06-26 14:13:11.775353
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 14:13:45.721935
++y
+
+# 2026-06-26 14:33:51.989943
++/exit
+
+# 2026-06-26 14:34:16.202446
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 14:34:37.406848
++y
+
+# 2026-06-26 14:37:31.073609
++/exit
+
+# 2026-06-26 14:37:41.814233
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 14:37:58.974609
++y
+
+# 2026-06-26 14:50:18.694549
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 14:52:33.982405
++y
+
+# 2026-06-26 14:58:30.190795
++打开了
+
+# 2026-06-26 15:04:55.686305
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-26 15:05:15.815413
++y
+
+# 2026-06-26 15:05:51.161071
++"C:\Users\z00490ns\Downloads\log-events-viewer-result (2).csv"
+
+# 2026-06-26 17:42:00.961790
++将用户z00490ns 下载文件夹中的第一个文件，作为附件发送给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 10:26:57.050588
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 10:27:11.985315
++y
+
+# 2026-06-29 10:29:17.524560
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 10:30:45.251024
++y
+
+# 2026-06-29 10:33:54.890134
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 10:34:08.385248
++y
+
+# 2026-06-29 11:24:48.712293
++/exit
+
+# 2026-06-29 11:25:00.768661
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 11:25:16.692466
++y
+
+# 2026-06-29 11:29:24.981777
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 11:29:40.271996
++y
+
+# 2026-06-29 11:31:43.452213
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 11:31:59.131388
++y
+
+# 2026-06-29 11:54:49.424165
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 11:57:00.454200
++y
+
+# 2026-06-29 13:25:20.398149
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 13:25:41.439607
++y
+
+# 2026-06-29 16:52:47.668964
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 16:53:03.133368
++y
+
+# 2026-06-29 17:00:07.126992
++/exit
+
+# 2026-06-29 17:03:02.579094
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-29 17:11:57.193163
++y
+
+# 2026-06-30 09:55:36.748371
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 09:55:52.913013
++y
+
+# 2026-06-30 10:03:35.518922
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 10:03:53.389594
++y
+
+# 2026-06-30 11:01:32.709084
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 11:01:50.500712
++y
+
+# 2026-06-30 11:06:10.737678
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 11:06:27.465839
++y
+
+# 2026-06-30 11:17:13.801042
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 11:17:32.544490
++y
+
+# 2026-06-30 11:50:38.676695
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 11:51:00.137153
++y
+
+# 2026-06-30 15:31:50.386354
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 15:32:10.197250
++y
+
+# 2026-06-30 16:01:15.412307
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:01:32.365210
++y
+
+# 2026-06-30 16:09:58.390123
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:10:14.966314
++y
+
+# 2026-06-30 16:17:00.996658
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:18:04.320970
++y
+
+# 2026-06-30 16:22:55.308552
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:23:11.130936
++y
+
+# 2026-06-30 16:44:28.439046
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:44:52.185844
++y
+
+# 2026-06-30 16:48:59.050267
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 16:49:20.138735
++y
+
+# 2026-06-30 17:02:54.033288
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 17:03:11.084377
++y
+
+# 2026-06-30 17:06:37.269011
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 17:06:53.130817
++y
+
+# 2026-06-30 17:10:28.173017
++发送一封邮件给 xiao-dong.chen@siemens.com , subjet: 123123, body: this is the text from desktop agent
+
+# 2026-06-30 17:16:02.839214
++y

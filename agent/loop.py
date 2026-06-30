@@ -1,0 +1,459 @@
+"""
+Agent Loop 核心：多轮工具调用循环
+User Input → Context Assembly → LLM Call → Tool Dispatch → Observation → Loop / Final Response
+所有消息自动写入 SQLite
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any, AsyncGenerator, Optional
+
+from config import get_settings
+from llm import get_llm_client
+from memory import (
+    MessageRole,
+    create_session,
+    save_message,
+    update_session_title,
+)
+from tools import get_all_schemas
+
+from . import context as ctx
+from . import tool_dispatcher
+from .planner import TaskPlan, TaskStep, TaskStatus
+
+
+class AgentLoop:
+    """
+    Agent 主循环
+    每次 run() 调用对应一个 Agent 思考-执行-观察的完整过程
+    """
+
+    def __init__(self, session_id: Optional[str] = None):
+        self.settings = get_settings()
+        self.llm = get_llm_client()
+
+        # 创建或复用会话
+        if session_id is None:
+            session = create_session()
+            self.session_id = session.id
+        else:
+            self.session_id = session_id
+
+        self._turn_count = 0
+        self._plan: Optional[TaskPlan] = None  # P1-3: 计划状态追踪
+
+    async def generate_skill_plan(
+        self,
+        user_input: str,
+        skill_content: str,
+    ) -> str:
+        """
+        Plan-First: 根据 Skill 步骤 + 用户输入生成具体化执行计划。
+        返回编号步骤列表文本（供用户确认）。
+        """
+        prompt = (
+            f"你是任务规划专家。根据以下 Skill 执行规范和用户请求，生成一份具体可执行的步骤计划。\n\n"
+            f"## Skill 执行规范\n{skill_content}\n\n"
+            f"## 用户请求\n{user_input}\n\n"
+            f"要求：\n"
+            f"1. 将 Skill 步骤具体化，将用户提供的参数（如收件人、主题、附件路径等）填入对应位置\n"
+            f"2. 每个步骤必须明确指定使用的工具名（如 `batch_locate_elements`、`run_actions`、`click` 等）\n"
+            f"3. 步骤描述格式：`步骤描述（工具名）`，例如：`批量定位 To/Subject/Body 控件（batch_locate_elements）`\n"
+            f"4. 仅返回编号列表，不要标题、不要 markdown 标记，格式如下：\n"
+            f"1. 启动 Outlook 并新建邮件（app_launch + hotkey Ctrl+N）\n"
+            f"2. 定位新邮件窗口（list_windows）\n"
+            f"3. 批量定位邮件编辑区控件（batch_locate_elements）\n"
+            f"4. 批量填写收件人、主题、正文（run_actions）"
+        )
+
+        messages = [
+            {"role": "system", "content": "你是任务规划助手，只返回编号步骤列表。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        response = await self.llm.chat(messages)
+        return (response.content or "").strip()
+
+    async def run(
+        self,
+        user_input: str,
+        on_token: Optional[Any] = None,
+        on_tool_call: Optional[Any] = None,
+        on_tool_result: Optional[Any] = None,
+        confirmed_plan: Optional[str] = None,
+    ) -> str:
+        """
+        执行一轮对话（含多步工具调用）。
+        是 run_stream() 的便捷包装：收集流式 token 后返回完整文本。
+
+        参数：
+            user_input: 用户输入的文字
+            on_token: 回调函数，收到流式 token 时调用 on_token(token: str)
+            on_tool_call: 回调函数，发起工具调用时调用 on_tool_call(name, args)
+            on_tool_result: 回调函数，工具返回结果时调用 on_tool_result(name, result)
+            confirmed_plan: Plan-First 模式下用户已确认的执行计划
+
+        返回：
+            最终的文本回复内容
+        """
+        full_response = ""
+        async for token in self.run_stream(
+            user_input=user_input,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            confirmed_plan=confirmed_plan,
+            on_token=on_token,
+        ):
+            full_response += token
+        return full_response
+
+    async def run_stream(
+        self,
+        user_input: str,
+        on_tool_call: Optional[Any] = None,
+        on_tool_result: Optional[Any] = None,
+        confirmed_plan: Optional[str] = None,
+        on_token: Optional[Any] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式版本：先用非流式检测工具调用（多轮），最终回复用流式输出。
+        confirmed_plan: Plan-First 模式下用户已确认的执行计划，传入后使用建立上下文的约束注入。
+        yield str token
+        """
+        # 1. 保存用户消息
+        save_message(self.session_id, role=MessageRole.user, content=user_input)
+
+        if self._turn_count == 0:
+            title = user_input[:20] + ("..." if len(user_input) > 20 else "")
+            update_session_title(self.session_id, title)
+        self._turn_count += 1
+
+        # P1-3: 解析计划文本为 TaskPlan，注入上下文
+        if confirmed_plan:
+            self._plan = self._parse_plan(confirmed_plan)
+            ctx.set_current_plan(self._plan)
+            messages = ctx.assemble_with_confirmed_plan(
+                user_input, self.session_id, confirmed_plan
+            )
+        else:
+            self._plan = None
+            ctx.clear_current_plan()
+            messages = await ctx.assemble(user_input, self.session_id)
+        tools = get_all_schemas()
+
+
+        # ── 任务执行阶段 ───────────────────────────────────
+        for iteration in range(self.settings.max_iterations):
+            try:
+                response = await self.llm.chat(messages, tools=tools)
+            except Exception as e:
+                if _is_context_overflow(e):
+                    yield f"\n{_context_overflow_msg()}"
+                    save_message(self.session_id, role=MessageRole.assistant, content=_context_overflow_msg())
+                    return
+                raise
+
+            if response.has_tool_calls:
+                # 工具调用阶段（非流式）
+                save_message(
+                    self.session_id,
+                    role=MessageRole.assistant,
+                    content=response.content,
+                    tool_calls=[
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                        for tc in response.tool_calls
+                    ],
+                )
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": response.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ],
+                }
+                messages.append(assistant_msg)
+
+                if on_tool_call:
+                    for tc in response.tool_calls:
+                        await _maybe_await(on_tool_call(tc.name, tc.arguments))
+
+                tool_results = await tool_dispatcher.execute(response.tool_calls)
+
+                # ── 步骤验证：用多模态模型检查操作是否成功 ──
+                if confirmed_plan and self._should_verify(response.tool_calls):
+                    verification = await self._verify_step(response.tool_calls, confirmed_plan)
+                    if verification:
+                        _append_verification(tool_results, verification)
+                        if on_tool_result:
+                            await _maybe_await(on_tool_result("verify_action_result", verification))
+
+                for tr in tool_results:
+                    save_message(
+                        self.session_id,
+                        role=MessageRole.tool,
+                        content=tr["content"],
+                        tool_call_id=tr["tool_call_id"],
+                        tool_name=tr["name"],
+                    )
+                    if on_tool_result:
+                        await _maybe_await(on_tool_result(tr["name"], tr["content"]))
+
+                messages.extend(tool_results)
+
+                # P1-3: 标记当前步骤进度
+                if self._plan:
+                    self._advance_plan(response.tool_calls, tool_results)
+
+                continue
+
+            else:
+                # 最终回复：流式输出
+                full_response = ""
+                try:
+                    async for token in self.llm.chat_stream(messages):
+                        full_response += token
+                        yield token
+                except Exception as e:
+                    if _is_context_overflow(e):
+                        yield f"\n{_context_overflow_msg()}"
+                        save_message(
+                            self.session_id,
+                            role=MessageRole.assistant,
+                            content=full_response or _context_overflow_msg(),
+                        )
+                        return
+                    raise
+
+                save_message(
+                    self.session_id,
+                    role=MessageRole.assistant,
+                    content=full_response,
+                )
+                return
+
+        yield f"\n[已达到最大迭代次数 {self.settings.max_iterations}]"
+
+    # ── 计划管理 ──
+
+    @staticmethod
+    def _parse_plan(plan_text: str) -> Optional[TaskPlan]:
+        """
+        P1-3: 将编号计划文本解析为 TaskPlan 对象。
+        """
+        import re
+        steps = []
+        for line in plan_text.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r"^(\d+)[.、]\s*(.+)$", line)
+            if m:
+                step_id = int(m.group(1))
+                desc = m.group(2).strip()
+                steps.append(TaskStep(id=step_id, description=desc))
+        if not steps:
+            return None
+        return TaskPlan(goal=plan_text[:80], steps=steps)
+
+    def _advance_plan(self, tool_calls: list, tool_results: list[dict]) -> None:
+        """
+        P1-3: 根据工具调用结果标记当前步骤进度。
+        """
+        if not self._plan or not self._plan.steps:
+            return
+
+        # 找当前待执行步骤
+        step = self._plan.current_step
+        if step is None:
+            step = self._plan.advance_to_next()
+        if step is None:
+            return
+
+        # 检查是否有工具执行出错
+        errors = [tr["content"] for tr in tool_results if tr["content"].startswith("错误：") or tr["content"].startswith("工具执行失败") or tr["content"].startswith("工具参数错误")]
+
+        tool_names = [tc.name for tc in tool_calls]
+        tool_names_str = ", ".join(tool_names)
+
+        if errors:
+            self._plan.mark_failed(step.id, error="; ".join(errors))
+        elif step.status == TaskStatus.PENDING or step.status == TaskStatus.RUNNING:
+            # 取最后一个非验证工具的结果做摘要
+            summary = tool_results[-1]["content"][:100] if tool_results else ""
+            self._plan.mark_done(step.id, result=summary, tool_used=tool_names_str)
+
+        # 推进到下一步
+        self._plan.advance_to_next()
+
+    # ── 步骤验证辅助方法 ──
+
+    # 不需要视觉验证的工具：纯查询、后台静默执行、不改变 UI 状态的操作
+    _NO_VERIFY_TOOLS = {
+        # 窗口/系统查询
+        "list_windows", "path_exists", "list_dir",
+        # 等待/时间控制
+        "sleep",
+        # 剪贴板操作
+        "get_clipboard", "set_clipboard",
+        # 后台命令（静默执行，屏幕不会有可见变化）
+        "run_command",
+        # 截图（本身不改变 UI）
+        "capture_image",
+        # 内容读取类
+        "analyze_screen", "analyze_image",
+        # 计划生成
+        "create_plan",
+    }
+
+    def _should_verify(self, tool_calls: list) -> bool:
+        """判断是否需要执行步骤验证"""
+        if not tool_calls:
+            return False
+        # 如果所有工具都是纯查询类，不需要验证
+        for tc in tool_calls:
+            if tc.name not in self._NO_VERIFY_TOOLS:
+                return True
+        return False
+
+    async def _verify_step(self, tool_calls: list, confirmed_plan: str) -> Optional[str]:
+        """
+        用多模态模型验证当前步骤是否成功。
+        返回验证结果文本，如果不需要验证返回 None。
+        """
+        from tools.vision import verify_action_result
+
+        # 从计划中提取当前步骤的预期效果
+        try:
+            # 构建验证提示
+            tool_summary = "; ".join(f"{tc.name}({json.dumps(tc.arguments, ensure_ascii=False)[:80]})" for tc in tool_calls)
+
+            # 从工具参数中提取目标窗口名（用于验证截图前的窗口激活）
+            target_window = None
+            is_launch_op = False
+            for tc in tool_calls:
+                args = tc.arguments or {}
+                # 对于 app_launch，name 是进程名（如 outlook.exe），不是窗口标题
+                # 需要先等待窗口出现，再用 list_windows 找到实际窗口
+                if tc.name == "app_launch":
+                    is_launch_op = True
+                    proc_name = args.get("name", "").replace(".exe", "")
+                    # 等待窗口出现
+                    await asyncio.sleep(3.0)
+                    try:
+                        # 用 list_windows 找到匹配进程名的窗口
+                        # 注：app_launch 工具已完成此发现并返回 window_title
+                        # 此处为验证截图提供窗口激活备用
+                        from tools.winpeekaboo import list_windows as list_wins
+                        raw = await list_wins(filter=proc_name)
+                        wins = json.loads(raw)
+                        if wins:
+                            # 取第一个匹配的窗口标题
+                            target_window = wins[0].get("title") or wins[0].get("text")
+                    except Exception:
+                        pass
+                    break
+                # 其他操作：从 window / title / name 参数提取窗口
+                for key in ("window", "title", "name"):
+                    if key in args and isinstance(args[key], str):
+                        target_window = args[key]
+                        break
+                if target_window:
+                    break
+
+            # app_switch 类操作也需要较长等待
+            if not is_launch_op:
+                is_launch_op = any(tc.name == "app_switch" for tc in tool_calls)
+            wait_seconds = 3.0 if is_launch_op else 1.0
+
+            # 用 LLM 生成验证描述
+            prompt = (
+                f"根据以下执行计划和刚执行的工具调用，简要描述预期的屏幕状态（一句话）。\n\n"
+                f"注意：请描述可直接在屏幕上观察到的 UI 状态，而非内部命令返回值。\n\n"
+                f"## 执行计划\n{confirmed_plan}\n\n"
+                f"## 刚执行的工具调用\n{tool_summary}\n\n"
+                f"只返回预期效果的描述，不要其他内容。"
+            )
+            messages = [
+                {"role": "system", "content": "你是任务验证助手，只返回可见 UI 状态的描述。"},
+                {"role": "user", "content": prompt},
+            ]
+            response = await self.llm.chat(messages)
+            expected = (response.content or "").strip()
+
+            if not expected:
+                return None
+
+            # 用多模态模型验证（传入目标窗口，验证前会自动激活）
+            result = await verify_action_result(expected, window=target_window, wait_seconds=wait_seconds)
+            return f"[屏幕观察] {result}"
+
+        except Exception as e:
+            return f"[屏幕观察] ⚠️ 观察过程出错: {type(e).__name__}: {e}"
+
+
+def _append_verification(tool_results: list[dict], verification: str) -> None:
+    """
+    将验证结果追加到最后一个工具结果的 content 末尾。
+
+    OpenAI API 要求 role= tool 的消息必须关联真实的 tool_call_id，
+    因此无法作为独立消息插入。追加到最后一个工具结果是符合
+    API 协议的唯一方式。
+    """
+    if not tool_results:
+        return
+    last_content = tool_results[-1]["content"]
+    if last_content:
+        tool_results[-1]["content"] = last_content + "\n\n" + verification
+    else:
+        tool_results[-1]["content"] = verification
+
+
+async def _maybe_await(coro_or_none):
+    """兼容普通函数和协程回调"""
+    import asyncio
+    if asyncio.iscoroutine(coro_or_none):
+        await coro_or_none
+
+
+# ══════════════════════════════════════════════════════
+# 上下文溢出检测（LLM 报错 → 优雅停止）
+# ══════════════════════════════════════════════════════
+
+_CONTEXT_OVERFLOW_KEYWORDS = [
+    "context length",
+    "maximum context length",
+    "context_length_exceeded",
+    "reduce your prompt",
+    "too many tokens",
+    "maximum number of tokens",
+    "reduce the number of tokens",
+    "input is too long",
+    "prompt is too long",
+]
+
+
+def _is_context_overflow(error: Exception) -> bool:
+    """判断是否为模型上下文溢出异常"""
+    # openai 库对 context overflow 返回 400 或 413，具体取决于服务端
+    status_code = getattr(error, "status_code", None)
+    if status_code == 413:
+        return True
+    # 仅当 status_code 为 400 时才检查关键词，避免误判其他错误
+    if status_code != 400:
+        return False
+    msg = str(error).lower()
+    return any(kw in msg for kw in _CONTEXT_OVERFLOW_KEYWORDS)
+
+
+def _context_overflow_msg() -> str:
+    return "⚠️ 已超出模型上下文窗口限制，本次任务停止。建议发起新会话（/new）继续。"

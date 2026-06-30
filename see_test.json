@@ -1,0 +1,851 @@
+{
+  "snapshot_id": "285eb119-c25b-481d-a9e0-b40c8fa416b7",
+  "timestamp": "2026-06-17T14:05:56.322641",
+  "screen_info": {
+    "width": 1920,
+    "height": 1200,
+    "dpi": 96,
+    "scaling": 1.0,
+    "monitor_count": 2,
+    "is_primary": true,
+    "monitor_index": 0
+  },
+  "window_info": {
+    "hwnd": 266140,
+    "title": ".env - Notepad",
+    "class_name": "Notepad",
+    "process_id": 28428,
+    "process_name": "Notepad.exe",
+    "is_visible": true,
+    "is_enabled": true,
+    "bounds": {
+      "x": 955,
+      "y": 0,
+      "width": 970,
+      "height": 581
+    }
+  },
+  "elements": [
+    {
+      "id": "el-9b4f0b59-718a-411a-8a01-cf83edc8f2ba",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-321bee68-f14e-489a-85e7-adcb786badee",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-f6267868-a698-4367-ba31-625620633148",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-4dd3574b-3035-4a49-a487-e6aeea803373",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-5fd88c86-d096-4842-bb82-db52bbd5049d",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-6f1e19af-507b-4249-b799-efacefbe9d6d",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-ffb767ac-4d3c-4f45-904e-361fb0f730da",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-dfe24abf-33ee-4a78-9523-800ebd68d4ba",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-b3433218-ce3d-4ad6-a6c9-db46e53822d9",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-f653fad8-db53-4eed-a8fe-6d7088a48aed",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-18cf93b0-2d9d-4472-a282-2c1f1456eb2f",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-c4336c7c-8c0f-4736-8c42-2623aed86dcb",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-6c8b2fe8-c64d-40da-83a2-cab0ab459817",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-9b377b71-9a25-4490-8df6-6da1e12f6711",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-754682dc-647a-4bfc-88a9-19a4b905fa32",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-0776daf8-3581-401d-a06a-6a80ae6f04c7",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-78f965e5-9e9f-4b90-b623-f2e348cf88f5",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-b681fba7-851d-4096-9434-c9f863cebce2",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-d1fac894-c10c-434a-8bad-34062b5185ff",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-bce2b1a9-ad8c-4a25-a8b6-172ce57a314f",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-113d4da2-878b-41b1-b2d8-e4d7932dd412",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-dbbe9aa5-7efb-4d29-81ea-5ed1af57e86c",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-18895821-dfd5-406a-80d3-0828bb737877",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-742f7d97-57ff-4305-bd28-29006a3c02db",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-ea1a3520-dd13-4787-aa65-f66a51680060",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-824aa7a2-19b0-427e-8b69-1fa0ad3dde9d",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-636b2b32-c2ce-404b-9d54-c98be531a1aa",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-98b8a585-5c05-4906-9f56-f6fbeee0dea0",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-ad8c4fee-9329-415f-aabe-26c464075df1",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-13913448-9487-4636-afd9-03f9a078f5af",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-e5bc5346-4d5d-4ef0-8485-f87bfdcbbaab",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-dda69d3c-cf4e-4a0c-9655-3c4e7e312912",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-323915e5-c9b2-4d45-b45e-ed656c6dc829",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-91807493-3c7e-4d94-8043-d2c74b700ba7",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-7abbdaa2-3a34-4430-a43b-a77973943309",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-6012459a-de1a-428f-bf37-c6c7b74bba3f",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-7727ef8f-a5e5-4f0f-8854-96e87ac6f5b4",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-b7859c3a-aef4-4fe2-9a8e-83f4d77864b6",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-5d2cf50d-cdc6-4afc-b771-585040208e94",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-4f7a2039-4f93-4568-b1ea-0d2673be5d46",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    },
+    {
+      "id": "el-c8dbda9b-3e5e-4816-a897-fdf89fcf9259",
+      "name": "",
+      "class_name": null,
+      "control_type": "Unknown",
+      "automation_id": null,
+      "help_text": null,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "is_enabled": true,
+      "is_visible": true,
+      "is_offscreen": false,
+      "is_keyboard_focusable": false,
+      "has_keyboard_focus": false,
+      "children": []
+    }
+  ],
+  "screenshot_base64": null
+}
