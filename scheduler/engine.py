@@ -4,15 +4,17 @@ APScheduler 引擎：初始化调度器，启动时从 SQLite 恢复所有持久
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from config import get_settings
-from memory import JobStatus, list_jobs
+from memory import JobStatus, list_jobs, store, update_job_status
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +53,18 @@ def _create_scheduler() -> BackgroundScheduler:
     return scheduler
 
 
-def start_scheduler() -> int:
+def start_scheduler(task_dispatcher=None, event_loop=None) -> int:
     """
     启动调度器并从数据库恢复已有的 active Job。
     返回恢复的任务数量。
     """
-    from .job_runner import run_skill_job
+    from .job_runner import (
+        configure_task_dispatcher,
+        run_automation_task_job,
+    )
+
+    if task_dispatcher is not None:
+        configure_task_dispatcher(task_dispatcher, event_loop)
 
     scheduler = get_scheduler()
     if scheduler.running:
@@ -65,11 +73,49 @@ def start_scheduler() -> int:
     scheduler.start()
     logger.info("APScheduler 已启动")
 
-    # 从业务表恢复任务（APScheduler SQLAlchemyJobStore 会自动恢复，
-    # 但我们需要同步确认业务表中 active 的任务都已注册）
-    restored = _sync_jobs_from_db(run_skill_job)
+    _disable_legacy_jobs()
+    restored = _sync_tasks_from_db(run_automation_task_job)
     logger.info(f"已恢复 {restored} 个定时任务")
     return restored
+
+
+def _disable_legacy_jobs() -> None:
+    """Pause prompt-driven legacy Jobs so they cannot run unattended after upgrade."""
+    scheduler = get_scheduler()
+    for job in list_jobs():
+        if job.status != JobStatus.active:
+            continue
+        try:
+            scheduler.remove_job(job.id)
+        except Exception:
+            pass
+        update_job_status(job.id, JobStatus.paused)
+        logger.warning("已暂停旧版提示词定时任务，需迁移为 Task: %s", job.id)
+
+
+def _sync_tasks_from_db(runner_func) -> int:
+    scheduler = get_scheduler()
+    count = 0
+    existing_job_ids = {job.id for job in scheduler.get_jobs()}
+    for task in store.list_task_records():
+        scheduler_id = f"task:{task.id}"
+        if task.status == "active" and scheduler_id not in existing_job_ids:
+            try:
+                document = json.loads(task.document)
+                misfire_policy = document.get("schedule", {}).get(
+                    "misfirePolicy", "run_once"
+                )
+                _add_task_job(
+                    task.id,
+                    task.cron_expr,
+                    task.timezone,
+                    runner_func,
+                    misfire_policy,
+                )
+                count += 1
+            except Exception as error:
+                logger.error("恢复 Task 失败 %s: %s", task.id, error)
+    return count
 
 
 def _sync_jobs_from_db(runner_func) -> int:
@@ -116,6 +162,66 @@ def add_job(job_id: str, cron_expr: str) -> None:
         replace_existing=True,
     )
     logger.info(f"已注册任务 {job_id}: {cron_expr}")
+
+
+def add_task(
+    task_id: str,
+    cron_expr: str,
+    timezone: str,
+    misfire_policy: str = "run_once",
+) -> None:
+    from .job_runner import run_automation_task_job
+
+    _add_task_job(
+        task_id, cron_expr, timezone, run_automation_task_job, misfire_policy
+    )
+
+
+def _add_task_job(
+    task_id: str,
+    cron_expr: str,
+    timezone: str,
+    runner_func,
+    misfire_policy: str = "run_once",
+) -> None:
+    trigger = CronTrigger.from_crontab(cron_expr, timezone=timezone)
+    scheduled = get_scheduler().add_job(
+        runner_func,
+        trigger=trigger,
+        id=f"task:{task_id}",
+        args=[task_id],
+        replace_existing=True,
+        coalesce=misfire_policy == "run_once",
+        misfire_grace_time=60 if misfire_policy == "run_once" else 1,
+    )
+    store.set_task_next_run(task_id, scheduled.next_run_time)
+    logger.info("已注册 Task %s: %s (%s)", task_id, cron_expr, timezone)
+
+
+def remove_task(task_id: str) -> None:
+    _safe_task_control("remove", task_id)
+
+
+def pause_task(task_id: str) -> None:
+    _safe_task_control("pause", task_id)
+
+
+def resume_task(task_id: str) -> None:
+    _safe_task_control("resume", task_id)
+
+
+def _safe_task_control(action: str, task_id: str) -> None:
+    scheduler = get_scheduler()
+    method = getattr(scheduler, f"{action}_job")
+    try:
+        method(f"task:{task_id}")
+        scheduled = scheduler.get_job(f"task:{task_id}")
+        store.set_task_next_run(
+            task_id,
+            scheduled.next_run_time if scheduled else None,
+        )
+    except Exception:
+        pass
 
 
 def remove_job(job_id: str) -> None:
@@ -169,3 +275,6 @@ def shutdown_scheduler() -> None:
         _scheduler.shutdown(wait=False)
         logger.info("APScheduler 已关闭")
     _scheduler = None
+    from .job_runner import configure_task_dispatcher
+
+    configure_task_dispatcher(None, None)

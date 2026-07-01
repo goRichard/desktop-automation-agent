@@ -54,6 +54,7 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         assert capabilities.json()["desktop"]["provider"] == "winpeekaboo"
         assert "publish" in capabilities.json()["skills"]
         assert "manage_credential" in capabilities.json()["models"]
+        assert "run" in capabilities.json()["tasks"]
 
         environment = client.get("/runtime/environment", headers=headers)
         assert environment.status_code == 200
@@ -185,6 +186,45 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         assert confirmed.status_code == 200
         _wait_for_status(client, headers, step_run.json()["id"], "succeeded")
 
+        task_document = {
+            "apiVersion": "desktop-agent/v1alpha1",
+            "kind": "Task",
+            "metadata": {"id": "daily-mail", "name": "Daily mail"},
+            "schedule": {
+                "cron": "0 0 1 1 *",
+                "timezone": "UTC",
+                "misfirePolicy": "run_once",
+                "maxConcurrentRuns": 1,
+            },
+            "skill": {"id": "send-outlook-mail", "version": "1.0.0"},
+            "parameters": {"recipient": "person@example.com"},
+            "execution": {"mode": "unattended", "timeoutSeconds": 30, "retries": 0},
+            "permissions": {"externalSideEffectsApproved": False},
+        }
+        task = client.post("/tasks", headers=headers, json=task_document)
+        assert task.status_code == 201
+        assert task.json()["skillVersion"] == "1.0.0"
+        assert task.json()["nextRunAt"] is not None
+
+        referenced = client.post(
+            "/skills/send-outlook-mail/versions/1.0.0/deprecate",
+            headers=headers,
+        )
+        assert referenced.status_code == 409
+
+        task_run = client.post("/tasks/daily-mail/run", headers=headers)
+        assert task_run.status_code == 202
+        _wait_for_status(client, headers, task_run.json()["id"], "succeeded")
+        executions = _wait_for_task_execution(client, headers, "daily-mail")
+        assert executions[0]["run_id"] == task_run.json()["id"]
+
+        paused = client.post("/tasks/daily-mail/pause", headers=headers)
+        assert paused.status_code == 200
+        assert paused.json()["status"] == "paused"
+        enabled = client.post("/tasks/daily-mail/enable", headers=headers)
+        assert enabled.status_code == 200
+        assert enabled.json()["status"] == "active"
+
 
 def _wait_for_status(client, headers: dict, run_id: str, expected: str) -> dict:
     deadline = time.monotonic() + 2
@@ -197,3 +237,16 @@ def _wait_for_status(client, headers: dict, run_id: str, expected: str) -> dict:
             return last
         time.sleep(0.01)
     raise AssertionError(f"Run {run_id} did not reach {expected}; last={last}")
+
+
+def _wait_for_task_execution(client, headers: dict, task_id: str) -> list[dict]:
+    deadline = time.monotonic() + 2
+    last = []
+    while time.monotonic() < deadline:
+        response = client.get(f"/tasks/{task_id}/executions", headers=headers)
+        assert response.status_code == 200
+        last = response.json()
+        if last and last[0]["status"] != "running":
+            return last
+        time.sleep(0.01)
+    raise AssertionError(f"Task {task_id} execution did not finish; last={last}")

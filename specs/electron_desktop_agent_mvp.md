@@ -583,6 +583,7 @@ PUT    /tasks/{id}
 POST   /tasks/{id}/enable
 POST   /tasks/{id}/pause
 POST   /tasks/{id}/run
+GET    /tasks/{id}/executions
 
 POST   /runs
 GET    /runs/{id}

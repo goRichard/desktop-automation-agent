@@ -89,6 +89,7 @@ class RuntimeManager:
         session_id: Optional[str] = None,
         unattended_approved: bool = False,
         skill_resolver: Optional[Any] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> dict[str, Any]:
         async with self._lifecycle_lock:
             from memory import create_session, get_session
@@ -150,6 +151,7 @@ class RuntimeManager:
                     inputs,
                     mode,
                     unattended_approved,
+                    timeout_seconds,
                 ),
                 name=f"flowpilot-skill-run-{controller.state.id}",
             )
@@ -165,6 +167,7 @@ class RuntimeManager:
         inputs: dict[str, Any],
         mode: Any,
         unattended_approved: bool,
+        timeout_seconds: Optional[int],
     ) -> None:
         from .controller import RunCancelled
         from .models import RunStatus
@@ -181,7 +184,7 @@ class RuntimeManager:
                     mode=mode,
                     unattended_approved=unattended_approved,
                 ),
-                timeout=document.execution.timeout_seconds,
+                timeout=timeout_seconds or document.execution.timeout_seconds,
             )
             summary = (
                 f"Skill {document.metadata.id}@{document.metadata.version} completed "
@@ -196,8 +199,9 @@ class RuntimeManager:
         except RunCancelled:
             return
         except TimeoutError:
+            effective_timeout = timeout_seconds or document.execution.timeout_seconds
             await controller.fail(
-                f"Skill timed out after {document.execution.timeout_seconds} seconds"
+                f"Skill timed out after {effective_timeout} seconds"
             )
         except Exception as error:
             await controller.fail(f"{type(error).__name__}: {error}")
@@ -220,6 +224,16 @@ class RuntimeManager:
     async def confirm(self, run_id: str, approved: bool) -> dict[str, Any]:
         managed = self._require_active(run_id)
         await managed.controller.confirm(approved)
+        return managed.controller.state.to_dict()
+
+    async def wait(self, run_id: str) -> dict[str, Any]:
+        managed = self._runs.get(run_id)
+        if managed is None:
+            value = await self.get_run(run_id)
+            if value is None:
+                raise LookupError(f"Run not found: {run_id}")
+            return value
+        await asyncio.shield(managed.task)
         return managed.controller.state.to_dict()
 
     def get_active(self, run_id: str) -> Optional[ManagedRun]:

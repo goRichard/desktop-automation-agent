@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from typing import Any, Awaitable, Callable, Optional
 
 from memory import (
     ExecutionStatus,
@@ -19,6 +20,44 @@ from memory import (
 )
 
 logger = logging.getLogger(__name__)
+_task_dispatcher: Optional[Callable[[str], Awaitable[dict[str, Any]]]] = None
+_runtime_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def configure_task_dispatcher(
+    dispatcher: Optional[Callable[[str], Awaitable[dict[str, Any]]]],
+    loop: Optional[asyncio.AbstractEventLoop],
+) -> None:
+    global _task_dispatcher, _runtime_loop
+    _task_dispatcher = dispatcher
+    _runtime_loop = loop
+
+
+def run_automation_task_job(task_id: str) -> None:
+    """APScheduler entry point for versioned unattended Tasks."""
+    try:
+        if _task_dispatcher and _runtime_loop and _runtime_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                _task_dispatcher(task_id), _runtime_loop
+            )
+            future.result(timeout=7 * 86400)
+        else:
+            asyncio.run(_run_task_standalone(task_id))
+    except Exception as error:
+        logger.error("Automation Task failed %s: %s", task_id, error, exc_info=True)
+
+
+async def _run_task_standalone(task_id: str) -> None:
+    from runtime.manager import RuntimeManager
+    from skills.repository import SkillRepository
+    from tasks.repository import TaskRepository
+    from tasks.runner import TaskRunner
+
+    manager = RuntimeManager()
+    try:
+        await TaskRunner(manager, TaskRepository(), SkillRepository()).run_scheduled(task_id)
+    finally:
+        await manager.shutdown()
 
 
 def run_skill_job(job_id: str) -> None:

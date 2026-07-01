@@ -2,12 +2,16 @@
 数据库模型定义（SQLModel）
 业务表：会话、消息、任务、记忆，以及 Runtime Run/Step/Event 记录
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
+
+
+def utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # ══════════════════════════════════════════════════════
@@ -52,8 +56,8 @@ class Session(SQLModel, table=True):
         primary_key=True,
     )
     title: Optional[str] = Field(default=None, description="首条消息前20字（自动生成）")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
 
     messages: List["Message"] = Relationship(back_populates="session")
 
@@ -82,7 +86,7 @@ class Message(SQLModel, table=True):
     tool_name: Optional[str] = Field(default=None, description="工具名称")
     # 可选统计
     token_count: Optional[int] = Field(default=None, description="token 数量，用于上下文管理")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
 
     session: Optional[Session] = Relationship(back_populates="messages")
 
@@ -103,7 +107,7 @@ class ScheduledJob(SQLModel, table=True):
     skill_name: str = Field(description="触发的 skill 名称")
     params: str = Field(default="{}", description="JSON 格式的参数")
     status: JobStatus = Field(default=JobStatus.active)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
     last_run_at: Optional[datetime] = Field(default=None)
     next_run_at: Optional[datetime] = Field(default=None)
     run_count: int = Field(default=0, description="累计执行次数")
@@ -124,7 +128,7 @@ class JobExecutionLog(SQLModel, table=True):
         primary_key=True,
     )
     job_id: str = Field(foreign_key="scheduled_jobs.id", index=True)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utc_now_naive)
     finished_at: Optional[datetime] = Field(default=None)
     status: ExecutionStatus = Field(default=ExecutionStatus.running)
     result: Optional[str] = Field(default=None, description="执行输出摘要")
@@ -149,8 +153,8 @@ class AgentMemory(SQLModel, table=True):
     value: str = Field(description="记忆内容")
     category: MemoryCategory = Field(default=MemoryCategory.fact)
     source_session_id: Optional[str] = Field(default=None, description="来自哪个会话")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
     expires_at: Optional[datetime] = Field(default=None, description="可选过期时间")
 
 
@@ -220,6 +224,39 @@ class RuntimeEvidenceRecord(SQLModel, table=True):
     created_at: str
 
 
+class AutomationTaskRecord(SQLModel, table=True):
+    __tablename__ = "automation_tasks"
+
+    id: str = Field(primary_key=True)
+    name: str
+    document: str = Field(description="JSON encoded Task document")
+    cron_expr: str
+    timezone: str
+    skill_id: str = Field(index=True)
+    skill_version: str
+    status: str = Field(default="active", index=True)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
+    run_count: int = 0
+    last_result: Optional[str] = None
+
+
+class TaskExecutionRecord(SQLModel, table=True):
+    __tablename__ = "task_executions"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    task_id: str = Field(foreign_key="automation_tasks.id", index=True)
+    run_id: Optional[str] = Field(default=None, index=True)
+    attempt: int = 1
+    status: str = Field(default="running", index=True)
+    started_at: datetime = Field(default_factory=utc_now_naive)
+    finished_at: Optional[datetime] = None
+    result: Optional[str] = None
+    error: Optional[str] = None
+
+
 class SkillRecord(SQLModel, table=True):
     __tablename__ = "skills"
 
@@ -228,8 +265,8 @@ class SkillRecord(SQLModel, table=True):
     description: str = ""
     latest_version: str
     published_version: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
 
 
 class SkillVersionRecord(SQLModel, table=True):
@@ -241,8 +278,8 @@ class SkillVersionRecord(SQLModel, table=True):
     status: str = Field(index=True)
     document: str = Field(description="JSON encoded Skill document")
     source_format: str = "yaml"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    updated_at: datetime = Field(default_factory=utc_now_naive)
     validated_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
 
@@ -251,4 +288,4 @@ class SchemaMigration(SQLModel, table=True):
     __tablename__ = "schema_migrations"
 
     version: int = Field(primary_key=True)
-    applied_at: datetime = Field(default_factory=datetime.utcnow)
+    applied_at: datetime = Field(default_factory=utc_now_naive)

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,6 +14,7 @@ from sqlmodel import SQLModel, create_engine, select
 
 from .models import (
     AgentMemory,
+    AutomationTaskRecord,
     ExecutionStatus,
     JobExecutionLog,
     JobStatus,
@@ -30,6 +31,7 @@ from .models import (
     Session,
     SkillRecord,
     SkillVersionRecord,
+    TaskExecutionRecord,
 )
 
 # ──────────────────────────────────────────────────────
@@ -37,6 +39,10 @@ from .models import (
 # ──────────────────────────────────────────────────────
 
 _engine = None
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def init_db(db_path: Path | str = "./data/agent.db") -> None:
@@ -59,7 +65,7 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 
 def _record_schema_version() -> None:
@@ -100,7 +106,7 @@ def update_session_title(session_id: str, title: str) -> None:
         s = db.get(Session, session_id)
         if s:
             s.title = title
-            s.updated_at = datetime.utcnow()
+            s.updated_at = _utc_now()
             db.add(s)
             db.commit()
 
@@ -264,7 +270,7 @@ def finish_execution_log(
     with DBSession(get_engine()) as db:
         log = db.get(JobExecutionLog, log_id)
         if log:
-            log.finished_at = datetime.utcnow()
+            log.finished_at = _utc_now()
             log.status = status
             log.result = result[:1000] if result else None
             log.error = error[:1000] if error else None
@@ -299,7 +305,7 @@ def set_memory(
         if existing:
             existing.value = value
             existing.category = category
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = _utc_now()
             existing.expires_at = expires_at
             db.add(existing)
             db.commit()
@@ -320,7 +326,7 @@ def set_memory(
 
 
 def get_memory(key: str) -> Optional[AgentMemory]:
-    now = datetime.utcnow()
+    now = _utc_now()
     with DBSession(get_engine()) as db:
         mem = db.exec(select(AgentMemory).where(AgentMemory.key == key)).first()
         if mem and mem.expires_at and mem.expires_at < now:
@@ -329,7 +335,7 @@ def get_memory(key: str) -> Optional[AgentMemory]:
 
 
 def list_memories(category: Optional[MemoryCategory] = None) -> list[AgentMemory]:
-    now = datetime.utcnow()
+    now = _utc_now()
     with DBSession(get_engine()) as db:
         stmt = select(AgentMemory)
         if category:
@@ -530,7 +536,7 @@ def create_skill_version(
         if duplicate:
             raise ValueError(f"Skill version already exists: {skill_id}@{version}")
 
-        now = datetime.utcnow()
+        now = _utc_now()
         skill = db.get(SkillRecord, skill_id)
         if skill is None:
             skill = SkillRecord(
@@ -580,7 +586,7 @@ def update_skill_version(
         ).first()
         if record is None:
             return None
-        now = datetime.utcnow()
+        now = _utc_now()
         if status is not None:
             record.status = status
         if document is not None:
@@ -641,5 +647,157 @@ def list_skill_versions(skill_id: str) -> list[SkillVersionRecord]:
             select(SkillVersionRecord)
             .where(SkillVersionRecord.skill_id == skill_id)
             .order_by(SkillVersionRecord.created_at.desc())
+        )
+        return list(db.exec(statement).all())
+
+
+# ──────────────────────────────────────────────────────
+# Versioned Automation Tasks
+# ──────────────────────────────────────────────────────
+
+def create_task_record(document: dict[str, Any]) -> AutomationTaskRecord:
+    metadata = document["metadata"]
+    schedule = document["schedule"]
+    skill = document["skill"]
+    record = AutomationTaskRecord(
+        id=metadata["id"],
+        name=metadata["name"],
+        document=json.dumps(document, ensure_ascii=False),
+        cron_expr=schedule["cron"],
+        timezone=schedule["timezone"],
+        skill_id=skill["id"],
+        skill_version=skill["version"],
+    )
+    with DBSession(get_engine()) as db:
+        if db.get(AutomationTaskRecord, record.id):
+            raise ValueError(f"Task already exists: {record.id}")
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def update_task_record(task_id: str, document: dict[str, Any]) -> Optional[AutomationTaskRecord]:
+    with DBSession(get_engine()) as db:
+        record = db.get(AutomationTaskRecord, task_id)
+        if record is None:
+            return None
+        metadata = document["metadata"]
+        schedule = document["schedule"]
+        skill = document["skill"]
+        record.name = metadata["name"]
+        record.document = json.dumps(document, ensure_ascii=False)
+        record.cron_expr = schedule["cron"]
+        record.timezone = schedule["timezone"]
+        record.skill_id = skill["id"]
+        record.skill_version = skill["version"]
+        record.updated_at = _utc_now()
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def get_task_record(task_id: str) -> Optional[AutomationTaskRecord]:
+    with DBSession(get_engine()) as db:
+        return db.get(AutomationTaskRecord, task_id)
+
+
+def list_task_records(include_deleted: bool = False) -> list[AutomationTaskRecord]:
+    with DBSession(get_engine()) as db:
+        statement = select(AutomationTaskRecord).order_by(AutomationTaskRecord.created_at.desc())
+        if not include_deleted:
+            statement = statement.where(AutomationTaskRecord.status != "deleted")
+        return list(db.exec(statement).all())
+
+
+def set_task_status(task_id: str, task_status: str) -> Optional[AutomationTaskRecord]:
+    with DBSession(get_engine()) as db:
+        record = db.get(AutomationTaskRecord, task_id)
+        if record is None:
+            return None
+        record.status = task_status
+        record.updated_at = _utc_now()
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def update_task_run_info(
+    task_id: str,
+    *,
+    result: str,
+    next_run_at: Optional[datetime],
+) -> None:
+    with DBSession(get_engine()) as db:
+        record = db.get(AutomationTaskRecord, task_id)
+        if record:
+            record.last_run_at = _utc_now()
+            record.next_run_at = next_run_at
+            record.run_count += 1
+            record.last_result = result[:500]
+            record.updated_at = _utc_now()
+            db.add(record)
+            db.commit()
+
+
+def set_task_next_run(task_id: str, next_run_at: Optional[datetime]) -> None:
+    with DBSession(get_engine()) as db:
+        record = db.get(AutomationTaskRecord, task_id)
+        if record:
+            record.next_run_at = next_run_at
+            record.updated_at = _utc_now()
+            db.add(record)
+            db.commit()
+
+
+def start_task_execution(
+    task_id: str,
+    attempt: int,
+    run_id: Optional[str] = None,
+) -> TaskExecutionRecord:
+    record = TaskExecutionRecord(task_id=task_id, attempt=attempt, run_id=run_id)
+    with DBSession(get_engine()) as db:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def attach_task_execution_run(execution_id: str, run_id: str) -> None:
+    with DBSession(get_engine()) as db:
+        record = db.get(TaskExecutionRecord, execution_id)
+        if record:
+            record.run_id = run_id
+            db.add(record)
+            db.commit()
+
+
+def finish_task_execution(
+    execution_id: str,
+    execution_status: str,
+    *,
+    result: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    with DBSession(get_engine()) as db:
+        record = db.get(TaskExecutionRecord, execution_id)
+        if record:
+            record.status = execution_status
+            record.finished_at = _utc_now()
+            record.result = result[:1000] if result else None
+            record.error = error[:1000] if error else None
+            db.add(record)
+            db.commit()
+
+
+def list_task_executions(task_id: str, limit: int = 50) -> list[TaskExecutionRecord]:
+    with DBSession(get_engine()) as db:
+        statement = (
+            select(TaskExecutionRecord)
+            .where(TaskExecutionRecord.task_id == task_id)
+            .order_by(TaskExecutionRecord.started_at.desc())
+            .limit(limit)
         )
         return list(db.exec(statement).all())

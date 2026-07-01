@@ -27,6 +27,16 @@ from skills import list_skills, load_skills
 from skills.executor import SkillExecutionError, SkillExecutor
 from skills.repository import SkillConflictError, SkillNotFoundError, SkillRepository
 from skills.schema import ExecutionMode, SkillDocument, SkillStatus
+from tasks import (
+    TaskConflictError,
+    TaskDocument,
+    TaskNotFoundError,
+    TaskRepository,
+    TaskStatus,
+    TaskValidationError,
+    validate_task_document,
+)
+from tasks.runner import TaskRunner
 
 from .lock import desktop_execution_lock
 from .manager import RuntimeConfigurationBusy, RuntimeManager
@@ -83,6 +93,8 @@ def create_app(
     runtime_token = token or os.environ.get("FLOWPILOT_RUNTIME_TOKEN") or secrets.token_urlsafe(32)
     manager = RuntimeManager()
     skill_repository = SkillRepository()
+    task_repository = TaskRepository()
+    task_runner = TaskRunner(manager, task_repository, skill_repository)
     secret_store = credential_store or get_default_secret_store()
     configure_secret_resolver(secret_store.get)
     settings = reload_settings()
@@ -98,14 +110,15 @@ def create_app(
         import tools  # noqa: F401
         from tools import scheduler_tool  # noqa: F401
 
-        start_scheduler()
+        start_scheduler(task_runner.run_scheduled, asyncio.get_running_loop())
         try:
             yield
         finally:
+            shutdown_scheduler()
             await manager.shutdown()
+            await task_runner.shutdown()
             await reset_llm_client()
             configure_secret_resolver(None)
-            shutdown_scheduler()
 
     app = FastAPI(
         title="SEWC FlowPilot Runtime",
@@ -115,6 +128,7 @@ def create_app(
     app.state.runtime_token = runtime_token
     app.state.runtime_manager = manager
     app.state.skill_repository = skill_repository
+    app.state.task_repository = task_repository
     app.state.credential_store = secret_store
 
     async def require_token(
@@ -146,6 +160,7 @@ def create_app(
             ],
             "events": ["history", "websocket"],
             "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
+            "tasks": ["create", "edit", "enable", "pause", "run", "history"],
             "models": [
                 "inspect",
                 "configure",
@@ -352,7 +367,107 @@ def create_app(
         dependencies=[Depends(require_token)],
     )
     async def deprecate_skill(skill_id: str, version: str) -> dict:
+        dependents = [
+            task for task in task_repository.list()
+            if task["status"] == TaskStatus.ACTIVE.value
+            and task["skillId"] == skill_id
+            and task["skillVersion"] == version
+        ]
+        if dependents:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Skill version is used by active Tasks: {[task['id'] for task in dependents]}",
+            )
         return _skill_operation(skill_repository.deprecate, skill_id, version)
+
+    @app.get("/tasks", dependencies=[Depends(require_token)])
+    async def list_tasks() -> list[dict]:
+        return task_repository.list()
+
+    @app.post(
+        "/tasks",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_token)],
+    )
+    async def create_task(document: TaskDocument) -> dict:
+        _validate_task_document(document, skill_repository)
+        _task_operation(task_repository.create, document)
+        from scheduler import add_task
+
+        add_task(
+            document.metadata.id,
+            document.schedule.cron,
+            document.schedule.timezone,
+            document.schedule.misfire_policy,
+        )
+        return task_repository.get(document.metadata.id)
+
+    @app.get("/tasks/{task_id}", dependencies=[Depends(require_token)])
+    async def get_task(task_id: str) -> dict:
+        return _task_operation(task_repository.get, task_id)
+
+    @app.put("/tasks/{task_id}", dependencies=[Depends(require_token)])
+    async def update_task(task_id: str, document: TaskDocument) -> dict:
+        _validate_task_document(document, skill_repository)
+        value = _task_operation(task_repository.update, task_id, document)
+        if value["status"] == TaskStatus.ACTIVE.value:
+            from scheduler import add_task
+
+            add_task(
+                task_id,
+                document.schedule.cron,
+                document.schedule.timezone,
+                document.schedule.misfire_policy,
+            )
+        return task_repository.get(task_id)
+
+    @app.post("/tasks/{task_id}/enable", dependencies=[Depends(require_token)])
+    async def enable_task(task_id: str) -> dict:
+        value = _task_operation(task_repository.get, task_id)
+        document = TaskDocument.model_validate(value["document"])
+        _validate_task_document(document, skill_repository)
+        _task_operation(task_repository.set_status, task_id, TaskStatus.ACTIVE)
+        from scheduler import add_task
+
+        add_task(
+            task_id,
+            document.schedule.cron,
+            document.schedule.timezone,
+            document.schedule.misfire_policy,
+        )
+        return task_repository.get(task_id)
+
+    @app.post("/tasks/{task_id}/pause", dependencies=[Depends(require_token)])
+    async def pause_task_endpoint(task_id: str) -> dict:
+        _task_operation(task_repository.set_status, task_id, TaskStatus.PAUSED)
+        from scheduler import pause_task
+
+        pause_task(task_id)
+        return task_repository.get(task_id)
+
+    @app.post(
+        "/tasks/{task_id}/run",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_token)],
+    )
+    async def run_task_now(task_id: str) -> dict:
+        try:
+            return await task_runner.start(task_id)
+        except (TaskNotFoundError, SkillNotFoundError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
+            ) from error
+        except (RuntimeError, SkillExecutionError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(error)
+            ) from error
+
+    @app.get("/tasks/{task_id}/executions", dependencies=[Depends(require_token)])
+    async def task_executions(
+        task_id: str,
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> list[dict]:
+        return _task_operation(task_repository.executions, task_id, limit)
 
     @app.post(
         "/runs",
@@ -530,6 +645,24 @@ def _skill_operation(handler, *args) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SkillConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+def _task_operation(handler, *args):
+    try:
+        return handler(*args)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except TaskConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+def _validate_task_document(document: TaskDocument, skills: SkillRepository) -> None:
+    try:
+        validate_task_document(document, skills)
+    except TaskValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
 
 
 def _resolve_skill_run(

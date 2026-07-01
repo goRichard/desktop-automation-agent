@@ -146,6 +146,14 @@ PUT  /models/{chat|vision}/credential
 DELETE /models/{chat|vision}/credential
 POST /models/{chat|vision}/health?probe=configuration|models|request|tool_calling|vision
 POST /certificates/import
+GET  /tasks
+POST /tasks
+GET  /tasks/{id}
+PUT  /tasks/{id}
+POST /tasks/{id}/enable
+POST /tasks/{id}/pause
+POST /tasks/{id}/run
+GET  /tasks/{id}/executions
 ```
 
 执行已发布 Skill：
@@ -167,6 +175,11 @@ POST /certificates/import
 `condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
 固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
 会在 `data/run_evidence` 保存错误元数据，并尽力采集截图和目标窗口 UIA 信息。
+
+Task 只能绑定 published Skill 固定版本，并使用 `unattended` 模式。Cron 保存 IANA 时区、
+misfire 策略、超时、重试和外部副作用授权；调度触发和“立即运行”均进入同一个 Runtime
+Run/Step/Event 流程。活动 Task 引用的 Skill 版本不能被弃用。升级前创建的提示词驱动
+`scheduled_jobs` 会在启动时自动暂停并保留数据，需要重新创建为版本化 Task。
 
 Skill 生命周期为 `draft → validated → published → deprecated`。只有 draft 可原地编辑；
 已发布内容必须通过新版本更新。确定性步骤通过工具注册表执行，Windows 桌面原子操作仍由
@@ -220,6 +233,7 @@ llm/            模型客户端
 memory/         SQLite/SQLModel 持久化
 runtime/        Run/Step 状态、事件总线和桌面互斥锁
 scheduler/      APScheduler 调度器
+tasks/          版本化 Task、校验和执行服务
 skills/         Skill 解析和注册
 tools/          Agent 工具和 WinPeekaboo Adapter
 tests/          当前测试与视觉定位评估
