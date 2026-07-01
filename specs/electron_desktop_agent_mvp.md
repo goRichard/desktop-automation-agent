@@ -562,6 +562,8 @@ MVP 不提供任意 `powershell.exe <string>` 工具。Skill 只能引用已审�
 GET    /health
 GET    /runtime/capabilities
 GET    /runtime/environment
+GET    /models
+POST   /models/{chat|vision}/health
 
 GET    /skills
 POST   /skills

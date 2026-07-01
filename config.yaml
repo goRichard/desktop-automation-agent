@@ -5,45 +5,81 @@ active_profile: azure
 
 profiles:
   local:                          # 内网 vLLM 部署
-    ssl_cert_path: "./siemens_ca_chain.pem"              # 可选：PEM 证书链文件路径（相对/绝对），留空则不使用自定义证书
-    llm:
-      model: Qwen3.6-35B-A3B-FP8
-      api_base: https://llm-ai-model.apps.os.sewc.siemens.com/v1
-      api_key_env: LLM_API_KEY    # 指向 .env 中的变量名，留空则不传 key
-      temperature: 0.7
-      max_tokens: 128000
-    vision:
-      model: Qwen3.6-35B-A3B
-      api_base: http://1759362599071661.cn-beijing.pai-eas.aliyuncs.com/api/predict/di_qwen3_5_35b/v1
-      api_key_env: VISION_API_KEY
+    models:
+      chat:
+        provider: openai_compatible
+        model: Qwen3.6-35B-A3B-FP8
+        baseUrl: https://llm-ai-model.apps.os.sewc.siemens.com/v1
+        apiKeyEnv: LLM_API_KEY    # 开发回退；Electron 将改用 Credential Manager
+        temperature: 0.7
+        maxTokens: 128000
+        tls:
+          verify: true
+          caBundle: ./siemens_ca_chain.pem
+      vision:
+        provider: openai_compatible
+        model: Qwen3.6-35B-A3B
+        baseUrl: http://1759362599071661.cn-beijing.pai-eas.aliyuncs.com/api/predict/di_qwen3_5_35b/v1
+        apiKeyEnv: VISION_API_KEY
+        capabilities:
+          chat: true
+          streaming: false
+          toolCalling: false
+          vision: true
+          jsonOutput: false
 
   cloud:                          # 云端 OpenAI
-    llm:
-      model: gpt-4o
-      api_base: https://api.openai.com/v1/
-      api_key_env: OPENAI_API_KEY
-      temperature: 0.7
-      max_tokens: 128000
-    vision:
-      model: gpt-4o
-      api_base: https://api.openai.com/v1/
-      api_key_env: OPENAI_API_KEY
+    models:
+      chat:
+        provider: openai
+        model: gpt-4o
+        apiKeyEnv: OPENAI_API_KEY
+        temperature: 0.7
+        maxTokens: 128000
+      vision:
+        provider: openai
+        model: gpt-4o
+        apiKeyEnv: OPENAI_API_KEY
 
   azure:                          # Azure OpenAI (GPT-5.2)
-    llm:
-      provider: azure
-      azure_endpoint: https://openai-aiattack-msa-001925-swedencentral-sewc-digitalization.openai.azure.com
-      api_version: "2025-03-01-preview"
-      model: gpt-5.2-2025-12-11
-      api_key_env: AZURE_OPENAI_API_KEY
-      temperature: 0.7
-      max_tokens: 16384
-    vision:
-      provider: azure
-      azure_endpoint: https://openai-aiattack-msa-001925-swedencentral-sewc-digitalization.openai.azure.com
-      api_version: "2025-03-01-preview"
-      model: gpt-5.2-2025-12-11
-      api_key_env: AZURE_OPENAI_API_KEY
+    models:
+      chat:
+        provider: azure_openai
+        azureEndpoint: https://openai-aiattack-msa-001925-swedencentral-sewc-digitalization.openai.azure.com
+        apiVersion: "2025-03-01-preview"
+        model: gpt-5.2-2025-12-11
+        apiKeyEnv: AZURE_OPENAI_API_KEY
+        temperature: 0.7
+        maxTokens: 16384
+      vision:
+        provider: azure_openai
+        azureEndpoint: https://openai-aiattack-msa-001925-swedencentral-sewc-digitalization.openai.azure.com
+        apiVersion: "2025-03-01-preview"
+        model: gpt-5.2-2025-12-11
+        apiKeyEnv: AZURE_OPENAI_API_KEY
+
+  ollama:                         # VM 本地 Ollama
+    models:
+      chat:
+        provider: ollama
+        model: qwen3
+        baseUrl: http://127.0.0.1:11434
+        capabilities:
+          chat: true
+          streaming: true
+          toolCalling: false
+          vision: false
+          jsonOutput: false
+      vision:
+        provider: ollama
+        model: qwen3-vl
+        baseUrl: http://127.0.0.1:11434
+        capabilities:
+          chat: true
+          streaming: true
+          toolCalling: false
+          vision: true
+          jsonOutput: false
 
 agent:
   max_iterations: 100

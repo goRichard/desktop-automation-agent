@@ -5,13 +5,15 @@ import hmac
 import os
 import secrets
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi import WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 
 from config import get_settings
+from config.model_provider import ModelRole
+from llm import get_llm_client, reset_llm_client
 from memory import init_db
 from scheduler import shutdown_scheduler, start_scheduler
 from skills import list_skills, load_skills
@@ -51,6 +53,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             yield
         finally:
             await manager.shutdown()
+            await reset_llm_client()
             shutdown_scheduler()
 
     app = FastAPI(
@@ -82,6 +85,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             "runs": ["start", "pause", "resume", "cancel", "history"],
             "events": ["history", "websocket"],
             "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
+            "models": ["inspect", "health_check"],
             "desktop": {"provider": "winpeekaboo", "maxConcurrentRuns": 1},
             "browser": {"provider": "playwright", "channel": "msedge"},
         }
@@ -96,6 +100,24 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             "browser": settings.browser,
             "desktopLockOwner": desktop_execution_lock.owner_run_id,
         }
+
+    @app.get("/models", dependencies=[Depends(require_token)])
+    async def model_providers() -> dict:
+        settings = get_settings()
+        return {
+            "chat": settings.chat_model.public_dict(),
+            "vision": settings.vision_model.public_dict(),
+        }
+
+    @app.post("/models/{role}/health", dependencies=[Depends(require_token)])
+    async def model_health(
+        role: ModelRole,
+        probe: Literal["configuration", "models", "request", "tool_calling", "vision"] = "models",
+    ) -> dict:
+        result = await get_llm_client().health_check(role, probe)
+        if result["status"] == "unhealthy":
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
+        return result
 
     @app.get("/skills", dependencies=[Depends(require_token)])
     async def list_versioned_skills() -> list[dict]:

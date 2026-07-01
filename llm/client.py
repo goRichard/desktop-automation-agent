@@ -1,5 +1,5 @@
 """
-LLM 客户端层：支持 OpenAI / Azure OpenAI / vLLM
+LLM facade：统一 OpenAI、OpenAI-compatible、Ollama 和 Azure OpenAI Provider
 - 对话模型（支持 function calling）
 - 视觉模型（图像输入）
 """
@@ -10,11 +10,12 @@ import json
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
 
-import httpx
-from openai import AsyncAzureOpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from config import get_settings
+from config.model_provider import ModelRole, ProviderType
+
+from .providers import ModelProvider, create_provider
 
 
 class ToolCall:
@@ -42,73 +43,29 @@ class LLMResponse:
         return len(self.tool_calls) > 0
 
 
+class ProviderCapabilityError(RuntimeError):
+    pass
+
+
 class LLMClient:
     """
     多后端 LLM 客户端，自动适配：
-    - OpenAI 标准 API（AsyncOpenAI）
-    - Azure OpenAI（AsyncAzureOpenAI，通过 azure_endpoint 自动检测）
-    - vLLM 本地部署（AsyncOpenAI + 自定义 base_url）
+    - OpenAI 标准 API
+    - OpenAI-compatible 内部网关和 vLLM
+    - Ollama OpenAI-compatible endpoint
+    - Azure OpenAI
 
     所有后端统一通过 chat() / chat_stream() / vision() / vision_for_coords() 调用。
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        chat_provider: Optional[ModelProvider] = None,
+        vision_provider: Optional[ModelProvider] = None,
+    ):
         self._settings = get_settings()
-        self._llm_client: Any = None
-        self._vision_client: Any = None
-
-    @staticmethod
-    def _build_http_client(ssl_cert_path: Optional[str]) -> Optional["httpx.AsyncClient"]:
-        """构建自定义 httpx.AsyncClient（带 SSL 证书验证）。"""
-        if not ssl_cert_path:
-            return None
-        import httpx
-        return httpx.AsyncClient(verify=ssl_cert_path, timeout=httpx.Timeout(120.0))
-
-    @staticmethod
-    def _build_timeout() -> "httpx.Timeout":
-        """统一的 HTTP 超时配置：连接 30s，读取 120s。"""
-        import httpx
-        return httpx.Timeout(30.0, read=120.0)
-
-    def _is_azure(self, cfg: dict[str, Any]) -> bool:
-        return bool(cfg.get("azure_endpoint", ""))
-
-    def _create_client(self, cfg: dict[str, Any]) -> Any:
-        """根据配置创建 AsyncOpenAI 或 AsyncAzureOpenAI 客户端。"""
-        http_client = self._build_http_client(cfg.get("ssl_cert_path"))
-
-        if self._is_azure(cfg):
-            kwargs: dict[str, Any] = {
-                "azure_endpoint": cfg["azure_endpoint"],
-                "api_version": cfg["api_version"],
-                "api_key": cfg["api_key"] or "not-needed",
-            }
-            if http_client:
-                kwargs["http_client"] = http_client
-            else:
-                kwargs["http_client"] = httpx.AsyncClient(timeout=self._build_timeout())
-            return AsyncAzureOpenAI(**kwargs)
-        else:
-            kwargs: dict[str, Any] = {
-                "base_url": cfg.get("api_base") or None,
-                "api_key": cfg.get("api_key") or "not-needed",
-            }
-            if http_client:
-                kwargs["http_client"] = http_client
-            else:
-                kwargs["http_client"] = httpx.AsyncClient(timeout=self._build_timeout())
-            return AsyncOpenAI(**kwargs)
-
-    def _get_llm_client(self):
-        if self._llm_client is None:
-            self._llm_client = self._create_client(self._settings.llm)
-        return self._llm_client
-
-    def _get_vision_client(self):
-        if self._vision_client is None:
-            self._vision_client = self._create_client(self._settings.vision)
-        return self._vision_client
+        self.chat_provider = chat_provider or create_provider(self._settings.chat_model)
+        self.vision_provider = vision_provider or create_provider(self._settings.vision_model)
 
     async def chat(
         self,
@@ -116,17 +73,20 @@ class LLMClient:
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         """非流式对话，支持 function calling"""
-        cfg = self._settings.llm
-        client = self._get_llm_client()
+        cfg = self.chat_provider.config
+        if tools and not cfg.capabilities.tool_calling:
+            raise ProviderCapabilityError(
+                f"Provider {cfg.provider.value}/{cfg.model} does not declare toolCalling support"
+            )
 
         kwargs: dict[str, Any] = {
-            "model": cfg["model"],
+            "model": cfg.model,
             "messages": messages,
-            "temperature": cfg.get("temperature", 0.7),
+            "temperature": cfg.temperature,
         }
         # GPT-5.2+ (Azure 新模型) 要求用 max_completion_tokens，旧模型用 max_tokens
-        _max = cfg.get("max_tokens", 4096)
-        if self._is_azure(cfg):
+        _max = cfg.max_tokens
+        if cfg.provider == ProviderType.AZURE_OPENAI:
             kwargs["max_completion_tokens"] = _max
         else:
             kwargs["max_tokens"] = _max
@@ -135,7 +95,7 @@ class LLMClient:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        response: ChatCompletion = await client.chat.completions.create(**kwargs)
+        response: ChatCompletion = await self.chat_provider.complete(**kwargs)
         return self._parse_response(response)
 
     async def chat_stream(
@@ -144,17 +104,19 @@ class LLMClient:
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> AsyncGenerator[str, None]:
         """流式对话，yield 文本 token（最终回复阶段使用）"""
-        cfg = self._settings.llm
-        client = self._get_llm_client()
+        cfg = self.chat_provider.config
+        if tools and not cfg.capabilities.tool_calling:
+            raise ProviderCapabilityError(
+                f"Provider {cfg.provider.value}/{cfg.model} does not declare toolCalling support"
+            )
 
         kwargs: dict[str, Any] = {
-            "model": cfg["model"],
+            "model": cfg.model,
             "messages": messages,
-            "temperature": cfg.get("temperature", 0.7),
-            "stream": True,
+            "temperature": cfg.temperature,
         }
-        _max = cfg.get("max_tokens", 4096)
-        if self._is_azure(cfg):
+        _max = cfg.max_tokens
+        if cfg.provider == ProviderType.AZURE_OPENAI:
             kwargs["max_completion_tokens"] = _max
         else:
             kwargs["max_tokens"] = _max
@@ -162,8 +124,7 @@ class LLMClient:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        stream = await client.chat.completions.create(**kwargs)
-        async for chunk in stream:
+        async for chunk in self.chat_provider.stream(**kwargs):
             if not chunk.choices:  # Azure 最后一个 chunk 可能 choices 为空
                 continue
             delta = chunk.choices[0].delta
@@ -172,22 +133,23 @@ class LLMClient:
 
     async def vision(self, image_path: str, prompt: str) -> str:
         """调用视觉模型分析图像"""
+        self._require_vision()
         b64, mime, _, _ = self._prepare_image_for_vision(image_path)
         return await self._call_vision(b64, mime, prompt)
 
     async def vision_for_coords(self, image_path: str, prompt: str) -> tuple[str, float, float]:
         """调用视觉模型定位 UI 元素，返回 (模型响应, x缩放比, y缩放比)。"""
+        self._require_vision()
         b64, mime, scale_x, scale_y = self._prepare_image_for_vision(image_path)
         text = await self._call_vision(b64, mime, prompt)
         return text, scale_x, scale_y
 
     async def _call_vision(self, b64: str, mime: str, prompt: str) -> str:
         """底层调用视觉模型"""
-        cfg = self._settings.vision
-        client = self._get_vision_client()
+        cfg = self.vision_provider.config
 
-        response: ChatCompletion = await client.chat.completions.create(
-            model=cfg["model"],
+        response: ChatCompletion = await self.vision_provider.complete(
+            model=cfg.model,
             messages=[
                 {
                     "role": "user",
@@ -202,6 +164,28 @@ class LLMClient:
             ],
         )
         return response.choices[0].message.content or ""
+
+    def _require_vision(self) -> None:
+        cfg = self.vision_provider.config
+        if not cfg.capabilities.vision:
+            raise ProviderCapabilityError(
+                f"Provider {cfg.provider.value}/{cfg.model} does not declare vision support"
+            )
+
+    def public_config(self) -> dict[str, dict]:
+        return {
+            ModelRole.CHAT.value: self.chat_provider.config.public_dict(),
+            ModelRole.VISION.value: self.vision_provider.config.public_dict(),
+        }
+
+    async def health_check(self, role: ModelRole, probe: str = "models") -> dict[str, Any]:
+        provider = self.chat_provider if role == ModelRole.CHAT else self.vision_provider
+        return await provider.health_check(probe)
+
+    async def close(self) -> None:
+        await self.chat_provider.close()
+        if self.vision_provider is not self.chat_provider:
+            await self.vision_provider.close()
 
     def _parse_response(self, response: ChatCompletion) -> LLMResponse:
         """解析 OpenAI ChatCompletion 响应为统一格式"""
@@ -285,7 +269,10 @@ def get_llm_client() -> LLMClient:
     if _client is None:
         _client = LLMClient()
     return _client
-"""
-LLM 客户端层：基于 OpenAI Python SDK，支持自定义 base_url 调用本地/云端服务
-本地部署的 vLLM 和云端服务均满足 OpenAI API 格式，直接用 openai 库即可
-"""
+
+
+async def reset_llm_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.close()
+    _client = None

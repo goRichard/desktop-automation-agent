@@ -4,13 +4,19 @@
 from __future__ import annotations
 
 import os
-import warnings
 from pathlib import Path
 from typing import Any, Optional
 
 import yaml
 from pydantic import PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .model_provider import (
+    ModelProviderConfig,
+    ModelRole,
+    ProviderType,
+    default_capabilities,
+)
 
 
 class Settings(BaseSettings):
@@ -59,64 +65,95 @@ class Settings(BaseSettings):
 
     def _resolve_key(self, key_env_name: str) -> str:
         """从实例属性中查找对应 env 变量的值"""
-        return getattr(self, key_env_name, "") or ""
+        return os.environ.get(key_env_name, "") or getattr(self, key_env_name, "") or ""
 
     def _resolve_cert_path(self, cert_value: str) -> Optional[str]:
-        """解析证书路径：支持绝对路径和相对路径（相对于项目根目录）"""
+        """Resolve a CA path relative to config.yaml without silently downgrading TLS."""
         if not cert_value:
             return None
 
-        cert_path = Path(cert_value)
+        expanded = os.path.expandvars(cert_value)
+        if "${APP_DATA}" in expanded:
+            app_data = os.environ.get("APPDATA", str(self._config_path.parent / "data"))
+            expanded = expanded.replace("${APP_DATA}", app_data)
+        cert_path = Path(expanded).expanduser()
         if cert_path.is_absolute():
             resolved = cert_path
         else:
             # 相对路径：相对于 config.yaml 所在目录（项目根）
             resolved = self._config_path.parent / cert_path
 
-        if resolved.exists():
-            return str(resolved)
+        return str(resolved)
 
-        # 路径不存在，记录警告但不阻塞（回退到系统默认证书）
-        warnings.warn(f"SSL cert path not found: {resolved}")
-        return None
+    def _model_config(self, role: ModelRole) -> ModelProviderConfig:
+        profile = self._current_profile
+        models = self._raw.get("models") or profile.get("models") or {}
+        legacy_key = "llm" if role == ModelRole.CHAT else "vision"
+        raw = dict(models.get(role.value) or profile.get(legacy_key) or {})
+        if not raw:
+            raise ValueError(f"Missing model configuration for role: {role.value}")
+
+        provider_value = raw.get("provider")
+        if provider_value == "azure":
+            raw["provider"] = ProviderType.AZURE_OPENAI.value
+        elif not provider_value:
+            endpoint = raw.get("azure_endpoint") or raw.get("azureEndpoint")
+            base_url = raw.get("api_base") or raw.get("base_url") or raw.get("baseUrl") or ""
+            if endpoint:
+                raw["provider"] = ProviderType.AZURE_OPENAI.value
+            elif "api.openai.com" in base_url:
+                raw["provider"] = ProviderType.OPENAI.value
+            else:
+                raw["provider"] = ProviderType.OPENAI_COMPATIBLE.value
+
+        cert = raw.pop("ssl_cert_path", "") or profile.get("ssl_cert_path", "")
+        tls = dict(raw.get("tls") or {})
+        ca_value = tls.get("caBundle") or tls.get("ca_bundle") or cert
+        if ca_value:
+            tls["caBundle"] = self._resolve_cert_path(str(ca_value))
+        raw["tls"] = tls
+
+        provider = ProviderType(raw["provider"])
+        if "capabilities" not in raw:
+            raw["capabilities"] = default_capabilities(role, provider).model_dump(
+                mode="json", by_alias=True
+            )
+        config = ModelProviderConfig.model_validate(raw)
+        if config.api_key_env:
+            config.set_resolved_api_key(self._resolve_key(config.api_key_env))
+        return config
+
+    @property
+    def chat_model(self) -> ModelProviderConfig:
+        return self._model_config(ModelRole.CHAT)
+
+    @property
+    def vision_model(self) -> ModelProviderConfig:
+        return self._model_config(ModelRole.VISION)
 
     @property
     def llm(self) -> dict[str, Any]:
-        """当前 profile 的对话模型配置（含 api_key 和 ssl_cert_path 已解析）"""
-        cfg = dict(self._current_profile.get("llm", {}))
-        key_env = cfg.pop("api_key_env", "")
-        cfg["api_key"] = self._resolve_key(key_env) if key_env else ""
-
-        # SSL 证书：llm 级别 > profile 级别
-        cert = cfg.pop("ssl_cert_path", "") or self._current_profile.get("ssl_cert_path", "")
-        cfg["ssl_cert_path"] = self._resolve_cert_path(cert)
-
-        # Azure: 保留 azure_endpoint 和 api_version 透传
-        if "azure_endpoint" not in cfg:
-            cfg["azure_endpoint"] = ""
-        if "api_version" not in cfg:
-            cfg["api_version"] = ""
-
-        return cfg
+        """Legacy dictionary view retained for CLI and evaluation compatibility."""
+        return self._legacy_model_dict(self.chat_model)
 
     @property
     def vision(self) -> dict[str, Any]:
-        """当前 profile 的视觉模型配置（含 api_key 和 ssl_cert_path 已解析）"""
-        cfg = dict(self._current_profile.get("vision", {}))
-        key_env = cfg.pop("api_key_env", "")
-        cfg["api_key"] = self._resolve_key(key_env) if key_env else ""
+        """Legacy dictionary view retained for existing vision tools."""
+        return self._legacy_model_dict(self.vision_model)
 
-        # SSL 证书：vision 级别 > profile 级别
-        cert = cfg.pop("ssl_cert_path", "") or self._current_profile.get("ssl_cert_path", "")
-        cfg["ssl_cert_path"] = self._resolve_cert_path(cert)
-
-        # Azure: 保留 azure_endpoint 和 api_version 透传
-        if "azure_endpoint" not in cfg:
-            cfg["azure_endpoint"] = ""
-        if "api_version" not in cfg:
-            cfg["api_version"] = ""
-
-        return cfg
+    @staticmethod
+    def _legacy_model_dict(config: ModelProviderConfig) -> dict[str, Any]:
+        return {
+            "provider": config.provider.value,
+            "model": config.model,
+            "api_base": config.base_url,
+            "azure_endpoint": config.azure_endpoint or "",
+            "api_version": config.api_version or "",
+            "api_key": config.resolve_api_key(),
+            "ssl_cert_path": str(config.tls.ca_bundle) if config.tls.ca_bundle else None,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+        }
 
     # ──────────────────────────────────────────────────
     # Agent 配置
@@ -152,13 +189,12 @@ class Settings(BaseSettings):
 
     def summary(self) -> str:
         """返回当前配置摘要（用于启动时展示）"""
-        provider_info = ""
-        if self.llm.get("azure_endpoint"):
-            provider_info = f" (Azure, deployment: {self.llm.get('model', 'N/A')})"
+        chat = self.chat_model
+        vision = self.vision_model
         return (
-            f"Profile: {self.active_profile}{provider_info} | "
-            f"LLM: {self.llm.get('model', 'N/A')} | "
-            f"Vision: {self.vision.get('model', 'N/A')}"
+            f"Profile: {self.active_profile} | "
+            f"Chat: {chat.provider.value}/{chat.model} | "
+            f"Vision: {vision.provider.value}/{vision.model}"
         )
 
 

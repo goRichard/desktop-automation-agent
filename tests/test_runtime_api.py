@@ -55,6 +55,17 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         assert environment.json()["browser"]["channel"] == "msedge"
         assert client.get("/runs", headers=headers).status_code == 200
 
+        models = client.get("/models", headers=headers)
+        assert models.status_code == 200
+        assert models.json()["chat"]["provider"] == "openai_compatible"
+        assert "apiKeyEnv" not in models.json()["chat"]
+        model_health = client.post(
+            "/models/chat/health?probe=configuration",
+            headers=headers,
+        )
+        assert model_health.status_code == 200
+        assert model_health.json()["status"] == "healthy"
+
         missing_session = client.post(
             "/runs",
             headers=headers,

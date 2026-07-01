@@ -10,7 +10,7 @@
 - Windows 桌面：通过 WinPeekaboo 启动应用、管理窗口、枚举 UIA 元素以及执行键鼠操作。
 - 视觉定位：UIA 确定性匹配优先，LLM 语义选择其次，视觉模型兜底。
 - 浏览器：通过 Playwright 控制系统 Microsoft Edge。
-- Agent Loop：支持 OpenAI-compatible 和 Azure OpenAI 的工具调用循环。
+- Agent Loop：统一支持 OpenAI、OpenAI-compatible、Ollama 和 Azure OpenAI Provider。
 - Skill：支持版本化 YAML Schema、Markdown 兼容导入、生命周期管理和确定性步骤执行。
 - 调度：通过 APScheduler 和 SQLite 持久化 Cron Task。
 - 历史：通过 SQLModel/SQLite 保存会话、消息、任务和执行日志。
@@ -65,17 +65,28 @@ browser:
   channel: msedge
 ```
 
-内部模型证书可以配置在 Profile 或具体模型下：
+模型 Provider 支持 `openai`、`openai_compatible`、`ollama` 和 `azure_openai`。
+Chat 与 Vision 可以选择不同 Provider。内部 CA Bundle 按模型独立配置：
 
 ```yaml
 profiles:
   local:
-    ssl_cert_path: ./internal-ca.pem
-    llm:
-      model: your-model
-      api_base: https://internal-model.example.com/v1
-      api_key_env: LLM_API_KEY
+    models:
+      chat:
+        provider: openai_compatible
+        model: your-model
+        baseUrl: https://internal-model.example.com/v1
+        apiKeyEnv: LLM_API_KEY
+        tls:
+          verify: true
+          caBundle: ./internal-ca.pem
 ```
+
+CA 文件不存在或指纹不匹配时配置加载失败，不会静默降级到系统证书。`apiKeyEnv` 仅作为
+当前开发阶段的密钥来源；Electron 版本将通过 Windows Credential Manager/safeStorage
+解析 `apiKeySecret`，密钥不会由 `/models` 接口返回。
+`tls.verify: false` 默认拒绝；仅开发环境显式设置
+`FLOWPILOT_ALLOW_INSECURE_TLS=1` 后可临时启用，且不得用于无人值守任务。
 
 ## 启动
 
@@ -118,6 +129,8 @@ PUT  /skills/{id}/versions/{version}
 POST /skills/{id}/versions/{version}/validate
 POST /skills/{id}/versions/{version}/publish
 POST /skills/{id}/versions/{version}/deprecate
+GET  /models
+POST /models/{chat|vision}/health?probe=configuration|models|request|tool_calling|vision
 ```
 
 Skill 生命周期为 `draft → validated → published → deprecated`。只有 draft 可原地编辑；
