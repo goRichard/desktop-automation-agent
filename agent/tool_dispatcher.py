@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import traceback
+from dataclasses import dataclass
 from typing import Any
 
 from llm import ToolCall
@@ -21,18 +23,33 @@ async def execute(tool_calls: list[ToolCall]) -> list[dict[str, Any]]:
     """
     messages = []
     for tc in tool_calls:
-        result = await _execute_one(tc)
-        content = str(result) if result is not None else ""
-        success = not _looks_like_error(content)
+        outcome = await _execute_one(tc)
         messages.append({
             "role": "tool",
             "tool_call_id": tc.id,
             "name": tc.name,
-            "content": content,
-            "success": success,
-            "error": None if success else content,
+            "content": outcome.content,
+            "success": outcome.success,
+            "error": outcome.error,
+            "data": outcome.data,
         })
     return messages
+
+
+def rejected(tool_calls: list[ToolCall], error: str) -> list[dict[str, Any]]:
+    """为被执行策略拒绝的调用生成完整 tool results，保持消息历史合法。"""
+    return [
+        {
+            "role": "tool",
+            "tool_call_id": tc.id,
+            "name": tc.name,
+            "content": f"工具调用被拒绝: {error}",
+            "success": False,
+            "error": error,
+            "data": None,
+        }
+        for tc in tool_calls
+    ]
 
 
 def to_openai_messages(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -64,22 +81,46 @@ def _looks_like_error(content: str) -> bool:
     return normalized.startswith(_ERROR_PREFIXES) or " 失败:" in normalized
 
 
-async def _execute_one(tc: ToolCall) -> Any:
+@dataclass(frozen=True)
+class _ExecutionOutcome:
+    success: bool
+    content: str
+    error: str | None = None
+    data: Any = None
+
+
+def _normalize_result(result: Any) -> _ExecutionOutcome:
+    """兼容旧字符串工具，并接受新工具返回的 {ok, data, error} 结构。"""
+    if isinstance(result, dict) and "ok" in result:
+        success = bool(result["ok"])
+        content = json.dumps(result, ensure_ascii=False, default=str)
+        error = None if success else str(result.get("error") or content)
+        return _ExecutionOutcome(success, content, error, result.get("data"))
+
+    content = str(result) if result is not None else ""
+    success = not _looks_like_error(content)
+    return _ExecutionOutcome(success, content, None if success else content)
+
+
+async def _execute_one(tc: ToolCall) -> _ExecutionOutcome:
     """执行单个工具调用"""
     func = get_tool(tc.name)
     if func is None:
-        return f"错误：未找到工具 '{tc.name}'。可用工具：{', '.join(_get_available_tools())}"
+        error = f"未找到工具 '{tc.name}'。可用工具：{', '.join(_get_available_tools())}"
+        return _ExecutionOutcome(False, f"错误：{error}", error)
 
     try:
         result = func(**tc.arguments)
         if asyncio.iscoroutine(result):
-            return await result
-        return result
+            result = await result
+        return _normalize_result(result)
     except TypeError as e:
-        return f"工具参数错误 ({tc.name}): {e}"
+        error = f"工具参数错误 ({tc.name}): {e}"
+        return _ExecutionOutcome(False, error, error)
     except Exception as e:
         tb = traceback.format_exc()
-        return f"工具执行失败 ({tc.name}): {type(e).__name__}: {e}\n{tb[:500]}"
+        error = f"工具执行失败 ({tc.name}): {type(e).__name__}: {e}"
+        return _ExecutionOutcome(False, f"{error}\n{tb[:500]}", error)
 
 
 def _get_available_tools() -> list[str]:

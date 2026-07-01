@@ -142,6 +142,7 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
 
         # ── Plan-First 拦截：Skill 匹配时生成计划并等待确认 ──
         confirmed_plan: str | None = None
+        plan_cancelled = False
         from skills.registry import find_matching_skill_async
         matched_skill = await find_matching_skill_async(user_input)
         if matched_skill:
@@ -161,6 +162,7 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
                     if answer.lower() in ("n", "no", "取消", "cancel"):
                         display.print_info("已取消")
                         confirmed_plan = None
+                        plan_cancelled = True
                         break
 
                     if answer == "" or answer.lower() in ("y", "yes", "是", "确认"):
@@ -184,7 +186,7 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
                 confirmed_plan = None
 
             # 用户取消了计划，结束本轮
-            if confirmed_plan is None:
+            if plan_cancelled:
                 display.print_separator()
                 continue
 

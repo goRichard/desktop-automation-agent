@@ -188,10 +188,21 @@ class AgentLoop:
                     for tc in response.tool_calls:
                         await _maybe_await(on_tool_call(tc.name, tc.arguments))
 
-                tool_results = await tool_dispatcher.execute(response.tool_calls)
+                plan_policy_error = self._begin_plan_step(response.tool_calls)
+                if plan_policy_error:
+                    tool_results = tool_dispatcher.rejected(
+                        response.tool_calls, plan_policy_error
+                    )
+                else:
+                    tool_results = await tool_dispatcher.execute(response.tool_calls)
 
                 # ── 步骤验证：用多模态模型检查操作是否成功 ──
-                if confirmed_plan and self._should_verify(response.tool_calls):
+                if (
+                    confirmed_plan
+                    and not plan_policy_error
+                    and all(result.get("success", True) for result in tool_results)
+                    and self._should_verify(response.tool_calls)
+                ):
                     verification = await self._verify_step(response.tool_calls, confirmed_plan)
                     if verification:
                         _append_verification(tool_results, verification)
@@ -213,7 +224,16 @@ class AgentLoop:
 
                 # P1-3: 标记当前步骤进度
                 if self._plan:
-                    self._advance_plan(response.tool_calls, tool_results)
+                    plan_failure = self._advance_plan(response.tool_calls, tool_results)
+                    if plan_failure:
+                        message = f"计划执行已停止：{plan_failure}"
+                        save_message(
+                            self.session_id,
+                            role=MessageRole.assistant,
+                            content=message,
+                        )
+                        yield message
+                        return
 
                 continue
 
@@ -252,6 +272,11 @@ class AgentLoop:
         P1-3: 将编号计划文本解析为 TaskPlan 对象。
         """
         import re
+
+        available_tools = {
+            schema["function"]["name"]
+            for schema in get_all_schemas()
+        }
         steps = []
         for line in plan_text.strip().split("\n"):
             line = line.strip()
@@ -261,24 +286,66 @@ class AgentLoop:
             if m:
                 step_id = int(m.group(1))
                 desc = m.group(2).strip()
-                steps.append(TaskStep(id=step_id, description=desc))
+                expected_tools = sorted(
+                    (
+                        tool_name for tool_name in available_tools
+                        if re.search(rf"(?<![\w]){re.escape(tool_name)}(?![\w])", desc)
+                    ),
+                    key=desc.find,
+                )
+                steps.append(TaskStep(
+                    id=step_id,
+                    description=desc,
+                    expected_tools=expected_tools,
+                ))
         if not steps:
             return None
         return TaskPlan(goal=plan_text[:80], steps=steps)
 
-    def _advance_plan(self, tool_calls: list, tool_results: list[dict]) -> None:
+    def _begin_plan_step(self, tool_calls: list) -> Optional[str]:
+        """标记当前步骤开始，并拒绝计划未授权的工具。"""
+        if not self._plan or not self._plan.steps:
+            return None
+
+        step = self._plan.current_step
+        if step is None:
+            step = self._plan.advance_to_next()
+        if step is None:
+            return "计划已完成，但模型仍尝试调用工具"
+        if step.status == TaskStatus.PENDING:
+            self._plan.mark_running(step.id)
+        if step.status == TaskStatus.FAILED:
+            return f"步骤 {step.id} 已失败，不能继续执行"
+
+        if step.expected_tools:
+            unexpected = [
+                tool_call.name for tool_call in tool_calls
+                if tool_call.name not in step.expected_tools
+            ]
+            if unexpected:
+                return (
+                    f"步骤 {step.id} 仅允许工具 {step.expected_tools}，"
+                    f"但模型请求了 {unexpected}"
+                )
+        return None
+
+    def _advance_plan(
+        self,
+        tool_calls: list,
+        tool_results: list[dict],
+    ) -> Optional[str]:
         """
-        P1-3: 根据工具调用结果标记当前步骤进度。
+        根据工具调用结果更新当前步骤。失败时返回停止原因。
         """
         if not self._plan or not self._plan.steps:
-            return
+            return None
 
         # 找当前待执行步骤
         step = self._plan.current_step
         if step is None:
             step = self._plan.advance_to_next()
         if step is None:
-            return
+            return None
 
         # 检查是否有工具执行出错
         errors = [tr["content"] for tr in tool_results if not tr.get("success", True)]
@@ -287,14 +354,25 @@ class AgentLoop:
         tool_names_str = ", ".join(tool_names)
 
         if errors:
-            self._plan.mark_failed(step.id, error="; ".join(errors))
-        elif step.status == TaskStatus.PENDING or step.status == TaskStatus.RUNNING:
-            # 取最后一个非验证工具的结果做摘要
-            summary = tool_results[-1]["content"][:100] if tool_results else ""
-            self._plan.mark_done(step.id, result=summary, tool_used=tool_names_str)
+            error = "; ".join(errors)
+            self._plan.mark_failed(step.id, error=error)
+            return f"步骤 {step.id} 失败：{error}"
 
-        # 推进到下一步
-        self._plan.advance_to_next()
+        self._plan.record_completed_tools(step.id, tool_names)
+        all_expected_done = (
+            not step.expected_tools
+            or all(name in step.completed_tools for name in step.expected_tools)
+        )
+        if step.status in (TaskStatus.PENDING, TaskStatus.RUNNING) and all_expected_done:
+            summary = tool_results[-1]["content"][:100] if tool_results else ""
+            self._plan.mark_done(
+                step.id,
+                result=summary,
+                tool_used=tool_names_str,
+            )
+            self._plan.advance_to_next()
+
+        return None
 
     # ── 步骤验证辅助方法 ──
 
@@ -417,6 +495,10 @@ def _append_verification(tool_results: list[dict], verification: str) -> None:
         tool_results[-1]["content"] = last_content + "\n\n" + verification
     else:
         tool_results[-1]["content"] = verification
+
+    if "⚠️" in verification or "❌" in verification:
+        tool_results[-1]["success"] = False
+        tool_results[-1]["error"] = verification
 
 
 async def _maybe_await(coro_or_none):

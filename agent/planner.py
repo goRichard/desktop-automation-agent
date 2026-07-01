@@ -25,6 +25,8 @@ class TaskStep:
     description: str                 # 步骤描述
     status: TaskStatus = TaskStatus.PENDING
     tool_used: Optional[str] = None  # 使用的工具名
+    expected_tools: List[str] = field(default_factory=list)  # 计划要求的工具
+    completed_tools: List[str] = field(default_factory=list)  # 已成功执行的工具
     result: Optional[str] = None     # 执行结果摘要
     error: Optional[str] = None      # 错误信息（失败时）
 
@@ -79,7 +81,7 @@ class TaskPlan:
         step = self._find_step(step_id)
         if step:
             step.status = TaskStatus.RUNNING
-            self.current_step_index = step_id - 1
+            self.current_step_index = self.steps.index(step)
 
     def mark_done(self, step_id: int, result: str, tool_used: Optional[str] = None) -> None:
         """标记步骤为完成"""
@@ -96,6 +98,19 @@ class TaskPlan:
         if step:
             step.status = TaskStatus.FAILED
             step.error = error
+
+    def record_completed_tools(self, step_id: int, tool_names: List[str]) -> None:
+        """记录当前步骤已成功执行的工具，保持首次出现顺序。"""
+        step = self._find_step(step_id)
+        if not step:
+            return
+        for tool_name in tool_names:
+            if tool_name not in step.completed_tools:
+                step.completed_tools.append(tool_name)
+
+    def has_failed(self) -> bool:
+        """计划中是否存在失败步骤。"""
+        return any(step.status == TaskStatus.FAILED for step in self.steps)
 
     def mark_skipped(self, step_id: int, reason: str = "") -> None:
         """标记步骤为跳过"""

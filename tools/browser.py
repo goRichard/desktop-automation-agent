@@ -46,6 +46,10 @@ async def _ensure_browser():
     if _state.is_ready:
         return _state.page
 
+    # Browser 进程已退出时，彻底释放旧 Playwright 对象后重建。
+    if _state.browser is not None and not _state.browser.is_connected():
+        await _close_browser()
+
     # ── 首次启动 ──
     if _state.browser is None:
         from config import get_settings
@@ -64,11 +68,15 @@ async def _ensure_browser():
         else:
             launch_options["channel"] = channel
 
-        _state.playwright = await async_playwright().start()
-        _state.browser = await _state.playwright.chromium.launch(**launch_options)
+        try:
+            _state.playwright = await async_playwright().start()
+            _state.browser = await _state.playwright.chromium.launch(**launch_options)
+        except Exception:
+            await _close_browser()
+            raise
 
     # ── 确保 context 存活 ──
-    if _state.context is None or not _state.browser.is_connected():
+    if _state.context is None:
         try:
             if _state.context is not None:
                 await _state.context.close()
@@ -86,7 +94,19 @@ async def _ensure_browser():
                     break
         except Exception:
             pass
-        _state.page = reused if reused is not None else await _state.context.new_page()
+        if reused is not None:
+            _state.page = reused
+        else:
+            try:
+                _state.page = await _state.context.new_page()
+            except Exception:
+                # context 可能已被用户或浏览器关闭，重建后再创建 page。
+                try:
+                    await _state.context.close()
+                except Exception:
+                    pass
+                _state.context = await _state.browser.new_context(no_viewport=True)
+                _state.page = await _state.context.new_page()
 
     return _state.page
 
@@ -122,14 +142,26 @@ def _get_ready_page():
 
 async def _close_browser():
     """关闭浏览器并清理资源"""
-    if _state.page and not _state.page.is_closed():
-        await _state.page.close()
-    if _state.context:
-        await _state.context.close()
-    if _state.browser:
-        await _state.browser.close()
-    if _state.playwright:
-        await _state.playwright.stop()
+    try:
+        if _state.page and not _state.page.is_closed():
+            await _state.page.close()
+    except Exception:
+        pass
+    try:
+        if _state.context:
+            await _state.context.close()
+    except Exception:
+        pass
+    try:
+        if _state.browser and _state.browser.is_connected():
+            await _state.browser.close()
+    except Exception:
+        pass
+    try:
+        if _state.playwright:
+            await _state.playwright.stop()
+    except Exception:
+        pass
     _state.page = None
     _state.context = None
     _state.browser = None
@@ -530,7 +562,7 @@ async def browser_press_key(key: str) -> str:
 async def browser_close() -> str:
     """关闭浏览器"""
     try:
-        if not _state.is_ready:
+        if not any((_state.page, _state.context, _state.browser, _state.playwright)):
             return "ℹ️ 浏览器未启动，无需关闭。"
         await _close_browser()
         return "✅ 浏览器已关闭"
