@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Secrets and local certificates
+.env
+*.pem
+*.key
+
+# Runtime state
+.agent_history/
+data/*.db
+data/*.db-*
+reports/
+screenshots/
+*.log
+
+# Generated evaluation artifacts
+see_*.json
+eval-image-processing/*.png
+tests/vision_bbox/output/
+
+# Electron / Node
+node_modules/
+desktop/dist/
+desktop/out/
+release/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

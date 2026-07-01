@@ -1,6 +1,6 @@
 """
 浏览器自动化工具：基于 Playwright，提供网页导航、元素交互、状态查询等能力。
-首次调用任何 browser_* 工具时自动启动 Chrome（非 headless，用户可见）。
+首次调用任何 browser_* 工具时自动启动 Microsoft Edge（非 headless，用户可见）。
 """
 from __future__ import annotations
 
@@ -48,14 +48,24 @@ async def _ensure_browser():
 
     # ── 首次启动 ──
     if _state.browser is None:
+        from config import get_settings
         from playwright.async_api import async_playwright
+
+        browser_config = get_settings().browser
+        channel = browser_config.get("channel", "msedge")
+        executable_path = browser_config.get("executable_path")
+        launch_options = {
+            "headless": False,
+            "args": ["--no-first-run", "--no-default-browser-check", "--start-maximized"],
+            "timeout": 30000,
+        }
+        if executable_path:
+            launch_options["executable_path"] = executable_path
+        else:
+            launch_options["channel"] = channel
+
         _state.playwright = await async_playwright().start()
-        _state.browser = await _state.playwright.chromium.launch(
-            executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            headless=False,
-            args=["--no-first-run", "--no-default-browser-check", "--start-maximized"],
-            timeout=30000,
-        )
+        _state.browser = await _state.playwright.chromium.launch(**launch_options)
 
     # ── 确保 context 存活 ──
     if _state.context is None or not _state.browser.is_connected():
@@ -224,7 +234,7 @@ def _format_elements(elements: list[dict]) -> str:
 # 浏览器工具
 # ══════════════════════════════════════════════════════
 
-@tool(description="打开指定 URL。首次调用时自动启动 Chrome 浏览器（非 headless，用户可见）。url 为要访问的完整网址。仅当任务需要后续网页交互/自动化时使用。")
+@tool(description="打开指定 URL。首次调用时自动启动 Microsoft Edge（非 headless，用户可见）。url 为要访问的完整网址。仅当任务需要后续网页交互/自动化时使用。")
 async def browser_navigate(url: str) -> str:
     """导航到指定 URL"""
     try:

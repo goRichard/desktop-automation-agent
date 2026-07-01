@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import traceback
 from typing import Any
 
@@ -23,17 +22,46 @@ async def execute(tool_calls: list[ToolCall]) -> list[dict[str, Any]]:
     messages = []
     for tc in tool_calls:
         result = await _execute_one(tc)
-        if isinstance(result, Exception):
-            content = f"工具执行出错: {type(result).__name__}: {result}"
-        else:
-            content = str(result) if result is not None else ""
+        content = str(result) if result is not None else ""
+        success = not _looks_like_error(content)
         messages.append({
             "role": "tool",
             "tool_call_id": tc.id,
             "name": tc.name,
             "content": content,
+            "success": success,
+            "error": None if success else content,
         })
     return messages
+
+
+def to_openai_messages(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """去除 Runtime 元数据，只保留 OpenAI tool message 允许的字段。"""
+    return [
+        {
+            "role": "tool",
+            "tool_call_id": result["tool_call_id"],
+            "name": result["name"],
+            "content": result["content"],
+        }
+        for result in results
+    ]
+
+
+_ERROR_PREFIXES = (
+    "错误：",
+    "错误:",
+    "工具执行失败",
+    "工具参数错误",
+    "工具执行出错",
+    "❌",
+)
+
+
+def _looks_like_error(content: str) -> bool:
+    """集中兼容尚未迁移为结构化结果的旧工具返回值。"""
+    normalized = content.lstrip()
+    return normalized.startswith(_ERROR_PREFIXES) or " 失败:" in normalized
 
 
 async def _execute_one(tc: ToolCall) -> Any:

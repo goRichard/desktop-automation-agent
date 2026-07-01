@@ -49,6 +49,7 @@ def cli(ctx, config):
     """Desktop Agent — Windows 桌面自动化 Agent（类 Claude Code 风格）"""
     # 切换工作目录到配置文件所在目录
     config_path = Path(config).resolve()
+    os.environ["DESKTOP_AGENT_CONFIG"] = str(config_path)
     if config_path.exists():
         os.chdir(config_path.parent)
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+from pydantic import PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,13 +33,15 @@ class Settings(BaseSettings):
     AZURE_OPENAI_API_KEY: str = ""
 
     # config.yaml 内容（初始化后填充）
-    _raw: dict[str, Any] = {}
+    _raw: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _config_path: Path = PrivateAttr(default=Path("config.yaml"))
 
     def model_post_init(self, __context: Any) -> None:
         """加载 config.yaml"""
-        config_path = Path("config.yaml")
-        if config_path.exists():
-            with open(config_path, encoding="utf-8") as f:
+        configured_path = os.environ.get("DESKTOP_AGENT_CONFIG", "config.yaml")
+        self._config_path = Path(configured_path).expanduser().resolve()
+        if self._config_path.exists():
+            with open(self._config_path, encoding="utf-8") as f:
                 self._raw = yaml.safe_load(f) or {}
 
     # ──────────────────────────────────────────────────
@@ -68,7 +71,7 @@ class Settings(BaseSettings):
             resolved = cert_path
         else:
             # 相对路径：相对于 config.yaml 所在目录（项目根）
-            resolved = Path.cwd() / cert_path
+            resolved = self._config_path.parent / cert_path
 
         if resolved.exists():
             return str(resolved)
@@ -129,11 +132,19 @@ class Settings(BaseSettings):
 
     @property
     def skills_dir(self) -> Path:
-        return Path(self.agent.get("skills_dir", "./skills/user_skills"))
+        return self._resolve_data_path(self.agent.get("skills_dir", "./skills/user_skills"))
 
     @property
     def memory_db(self) -> Path:
-        return Path(self.agent.get("memory_db", "./data/agent.db"))
+        return self._resolve_data_path(self.agent.get("memory_db", "./data/agent.db"))
+
+    @property
+    def browser(self) -> dict[str, Any]:
+        return dict(self._raw.get("browser", {"channel": "msedge"}))
+
+    def _resolve_data_path(self, value: str) -> Path:
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else self._config_path.parent / path
 
     @property
     def system_prompt(self) -> str:

@@ -66,7 +66,7 @@ agent:
     - 截图理解 → `capture_image` + `analyze_image` / `parse_image_to_markdown`
 
     **浏览器/网页任务**（访问 URL、网页交互、表单填写、网络搜索等）：
-    - 访问网址 → `browser_navigate(url)` （首次调用自动启动 Chrome，后续可继续交互）
+    - 访问网址 → `browser_navigate(url)` （首次调用自动启动 Microsoft Edge，后续可继续交互）
     - 查看页面元素 → `browser_get_state`
     - 点击元素 → `browser_click(description)`
     - 输入文字 → `browser_type(description, text)`
@@ -99,7 +99,7 @@ agent:
 
     ## 执行规范
     - 思考时清晰说明每一步意图，**说出要执行的工具就立刻调用，不要只说不做**。
-    - **批量调用优化**：当需要连续执行多个无依赖的确定性操作时，请在单次响应中同时返回多个 tool_calls，系统会自动并发执行。
+    - **批量调用优化**：当需要连续执行多个确定性操作时，可以在单次响应中返回多个 tool_calls，系统会按返回顺序依次执行。
       **典型场景**：点击坐标后立即输入文字 → 同时返回 `click` + `type_text`；激活窗口后按键 → 同时返回 `window_activate` + `press_key`。
       但需要视觉反馈的操作（如 `find_and_click`、`analyze_image`、`browser_click`）不要与后续操作批量调用，必须先看到结果再决定下一步。
       **更多连续确定性操作**（如 click→type_text→press_key→sleep）可使用 `run_actions` 工具一次性批量执行。
@@ -108,3 +108,6 @@ agent:
     - **Skill 执行流程**：当匹配到 Skill 时，先从 Skill 文件中提取高层步骤生成计划展示给用户，确认后逐步执行。步骤内部的备选方案可自行回退处理。遇到备选方案也无法解决的问题时，暂停执行并截图告知用户，获取反馈后再继续。
     - **同窗口批量优化**：对同一窗口内的多个 UI 操作（如多个输入框、按钮），使用 `batch_locate_elements` 一次性获取所有坐标，再按顺序逐步 click + type_text。禁止对同窗口的每个元素单独调用 `find_and_click`，避免重复 UIA 扫描和模型调用。
     - **等待操作**：UI 操作之间需要等待时，使用 `sleep(seconds=X)` 工具，不要调用不存在的 `wait()`。
+
+browser:
+  channel: msedge                   # MVP 优先使用系统 Microsoft Edge

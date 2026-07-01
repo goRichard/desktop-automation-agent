@@ -122,9 +122,6 @@ class AgentLoop:
         confirmed_plan: Plan-First 模式下用户已确认的执行计划，传入后使用建立上下文的约束注入。
         yield str token
         """
-        # 1. 保存用户消息
-        save_message(self.session_id, role=MessageRole.user, content=user_input)
-
         if self._turn_count == 0:
             title = user_input[:20] + ("..." if len(user_input) > 20 else "")
             update_session_title(self.session_id, title)
@@ -141,6 +138,10 @@ class AgentLoop:
             self._plan = None
             ctx.clear_current_plan()
             messages = await ctx.assemble(user_input, self.session_id)
+
+        # 上下文必须在保存本轮消息前组装，否则数据库历史和下面追加的 user message
+        # 会包含同一条输入两次。
+        save_message(self.session_id, role=MessageRole.user, content=user_input)
         tools = get_all_schemas()
 
 
@@ -208,7 +209,7 @@ class AgentLoop:
                     if on_tool_result:
                         await _maybe_await(on_tool_result(tr["name"], tr["content"]))
 
-                messages.extend(tool_results)
+                messages.extend(tool_dispatcher.to_openai_messages(tool_results))
 
                 # P1-3: 标记当前步骤进度
                 if self._plan:
@@ -280,7 +281,7 @@ class AgentLoop:
             return
 
         # 检查是否有工具执行出错
-        errors = [tr["content"] for tr in tool_results if tr["content"].startswith("错误：") or tr["content"].startswith("工具执行失败") or tr["content"].startswith("工具参数错误")]
+        errors = [tr["content"] for tr in tool_results if not tr.get("success", True)]
 
         tool_names = [tc.name for tc in tool_calls]
         tool_names_str = ", ".join(tool_names)
