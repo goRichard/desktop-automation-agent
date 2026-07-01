@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import yaml
 from fastapi.testclient import TestClient
 
@@ -111,7 +113,16 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         )
         assert missing_session.status_code == 404
 
-        created = client.post("/skills", headers=headers, json=skill_value())
+        executable_skill = skill_value()
+        executable_skill["execution"]["steps"] = [
+            {
+                "id": "wait",
+                "name": "Short wait",
+                "action": "ui.wait",
+                "with": {"seconds": 0},
+            }
+        ]
+        created = client.post("/skills", headers=headers, json=executable_skill)
         assert created.status_code == 201
         assert created.json()["status"] == "draft"
 
@@ -130,3 +141,59 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         skill = client.get("/skills/send-outlook-mail", headers=headers)
         assert skill.status_code == 200
         assert skill.json()["publishedVersion"] == "1.0.0"
+
+        invalid_inputs = client.post(
+            "/runs",
+            headers=headers,
+            json={"skillId": "send-outlook-mail", "inputs": {}, "mode": "guided"},
+        )
+        assert invalid_inputs.status_code == 422
+
+        skill_run = client.post(
+            "/runs",
+            headers=headers,
+            json={
+                "skillId": "send-outlook-mail",
+                "skillVersion": "1.0.0",
+                "inputs": {"recipient": "person@example.com"},
+                "mode": "guided",
+            },
+        )
+        assert skill_run.status_code == 202
+        guided_run = _wait_for_status(client, headers, skill_run.json()["id"], "succeeded")
+        assert guided_run["run_type"] == "skill"
+        assert guided_run["skill_version"] == "1.0.0"
+        assert guided_run["steps"][0]["tool_names"] == ["sleep"]
+
+        step_run = client.post(
+            "/runs",
+            headers=headers,
+            json={
+                "skillId": "send-outlook-mail",
+                "inputs": {"recipient": "person@example.com"},
+                "mode": "step",
+            },
+        )
+        assert step_run.status_code == 202
+        waiting = _wait_for_status(client, headers, step_run.json()["id"], "waiting_user")
+        assert waiting["pending_confirmation"]["stepId"] == "wait"
+        confirmed = client.post(
+            f"/runs/{step_run.json()['id']}/confirm",
+            headers=headers,
+            json={"approved": True},
+        )
+        assert confirmed.status_code == 200
+        _wait_for_status(client, headers, step_run.json()["id"], "succeeded")
+
+
+def _wait_for_status(client, headers: dict, run_id: str, expected: str) -> dict:
+    deadline = time.monotonic() + 2
+    last = None
+    while time.monotonic() < deadline:
+        response = client.get(f"/runs/{run_id}", headers=headers)
+        assert response.status_code == 200
+        last = response.json()
+        if last["status"] == expected:
+            return last
+        time.sleep(0.01)
+    raise AssertionError(f"Run {run_id} did not reach {expected}; last={last}")

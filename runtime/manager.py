@@ -80,6 +80,120 @@ class RuntimeManager:
             # AgentLoop already records the failure on the controller.
             return
 
+    async def start_skill_run(
+        self,
+        document: Any,
+        inputs: dict[str, Any],
+        mode: Any,
+        *,
+        session_id: Optional[str] = None,
+        unattended_approved: bool = False,
+    ) -> dict[str, Any]:
+        async with self._lifecycle_lock:
+            from memory import create_session, get_session
+            from skills.executor import ACTION_TO_TOOL, SkillExecutor
+
+            if session_id:
+                if await asyncio.to_thread(get_session, session_id) is None:
+                    raise LookupError(f"Session not found: {session_id}")
+                resolved_session_id = session_id
+            else:
+                session = await asyncio.to_thread(
+                    create_session, f"Skill: {document.metadata.name}"
+                )
+                resolved_session_id = session.id
+
+            controller = RunController(
+                session_id=resolved_session_id,
+                user_input=f"Run Skill {document.metadata.id}@{document.metadata.version}",
+                event_bus=self.events,
+                persistence=self.persistence,
+                run_type="skill",
+                skill_id=document.metadata.id,
+                skill_version=document.metadata.version,
+                execution_mode=mode.value,
+                inputs=inputs,
+            )
+            agent_loop_holder: dict[str, Any] = {}
+
+            async def run_agent_step(instruction: str, allowed_tools: list[str]) -> str:
+                from agent import AgentLoop
+
+                loop = agent_loop_holder.get("loop")
+                if loop is None:
+                    loop = AgentLoop(session_id=resolved_session_id, event_bus=self.events)
+                    agent_loop_holder["loop"] = loop
+                tool_names = {ACTION_TO_TOOL.get(name, name) for name in allowed_tools}
+                return await loop.execute_instruction(
+                    instruction,
+                    controller,
+                    allowed_tool_names=tool_names or None,
+                )
+
+            executor = SkillExecutor(
+                agent_runner=run_agent_step,
+                confirmation_runner=controller.request_confirmation,
+            )
+            task = asyncio.create_task(
+                self._consume_skill_run(
+                    executor,
+                    controller,
+                    document,
+                    inputs,
+                    mode,
+                    unattended_approved,
+                ),
+                name=f"flowpilot-skill-run-{controller.state.id}",
+            )
+            self._runs[controller.state.id] = ManagedRun(controller, executor, task)
+        await asyncio.sleep(0)
+        return controller.state.to_dict()
+
+    async def _consume_skill_run(
+        self,
+        executor: Any,
+        controller: RunController,
+        document: Any,
+        inputs: dict[str, Any],
+        mode: Any,
+        unattended_approved: bool,
+    ) -> None:
+        from .controller import RunCancelled
+        from .models import RunStatus
+
+        try:
+            await controller.initialize()
+            await controller.transition(RunStatus.PREPARING)
+            await controller.transition(RunStatus.RUNNING)
+            result = await asyncio.wait_for(
+                executor.execute(
+                    document,
+                    inputs,
+                    controller=controller,
+                    mode=mode,
+                    unattended_approved=unattended_approved,
+                ),
+                timeout=document.execution.timeout_seconds,
+            )
+            summary = (
+                f"Skill {document.metadata.id}@{document.metadata.version} completed "
+                f"with {len(result['steps'])} steps"
+            )
+            controller.state.output += summary
+            await controller.emit("run.output", {"delta": summary})
+            await controller.emit("skill.completed", {"result": result})
+            if controller.persistence:
+                await controller.persistence.save_run(controller.state)
+            await controller.succeed()
+        except RunCancelled:
+            return
+        except TimeoutError:
+            await controller.fail(
+                f"Skill timed out after {document.execution.timeout_seconds} seconds"
+            )
+        except Exception as error:
+            await controller.fail(f"{type(error).__name__}: {error}")
+
     async def pause(self, run_id: str) -> dict[str, Any]:
         managed = self._require_active(run_id)
         await managed.controller.pause()
@@ -93,6 +207,11 @@ class RuntimeManager:
     async def cancel(self, run_id: str, reason: str) -> dict[str, Any]:
         managed = self._require_active(run_id)
         await managed.controller.cancel(reason)
+        return managed.controller.state.to_dict()
+
+    async def confirm(self, run_id: str, approved: bool) -> dict[str, Any]:
+        managed = self._require_active(run_id)
+        await managed.controller.confirm(approved)
         return managed.controller.state.to_dict()
 
     def get_active(self, run_id: str) -> Optional[ManagedRun]:
@@ -117,27 +236,37 @@ class RuntimeManager:
         if managed:
             return managed.controller.state.to_dict()
 
-        from memory import get_runtime_run, list_runtime_steps
+        from memory import get_runtime_run, get_runtime_run_context, list_runtime_steps
 
         record = await asyncio.to_thread(get_runtime_run, run_id)
         if record is None:
             return None
         steps = await asyncio.to_thread(list_runtime_steps, run_id)
         value = record.model_dump()
+        context = await asyncio.to_thread(get_runtime_run_context, run_id)
+        if context:
+            value.update(self._context_record_to_dict(context))
         value["steps"] = [self._step_record_to_dict(step) for step in steps]
         return value
 
     async def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
-        from memory import list_runtime_runs
+        from memory import list_runtime_run_contexts, list_runtime_runs
 
         records = await asyncio.to_thread(list_runtime_runs, limit)
+        contexts = await asyncio.to_thread(
+            list_runtime_run_contexts, [record.id for record in records]
+        )
+        context_by_run = {
+            context.run_id: self._context_record_to_dict(context) for context in contexts
+        }
         active = {run_id: run for run_id, run in self._runs.items()}
         values = []
         for record in records:
             managed = active.get(record.id)
-            values.append(
-                managed.controller.state.to_dict() if managed else record.model_dump()
-            )
+            value = managed.controller.state.to_dict() if managed else record.model_dump()
+            if not managed and record.id in context_by_run:
+                value.update(context_by_run[record.id])
+            values.append(value)
         return values
 
     async def list_events(
@@ -182,4 +311,10 @@ class RuntimeManager:
     def _step_record_to_dict(record: Any) -> dict[str, Any]:
         value = record.model_dump(exclude={"tool_names"})
         value["tool_names"] = json.loads(record.tool_names)
+        return value
+
+    @staticmethod
+    def _context_record_to_dict(record: Any) -> dict[str, Any]:
+        value = record.model_dump(exclude={"run_id", "inputs"})
+        value["inputs"] = json.loads(record.inputs)
         return value

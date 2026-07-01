@@ -64,6 +64,12 @@ class StepRunState:
 class RunState:
     session_id: str
     user_input: str
+    run_type: str = "agent"
+    skill_id: Optional[str] = None
+    skill_version: Optional[str] = None
+    execution_mode: Optional[str] = None
+    inputs: dict[str, Any] = field(default_factory=dict)
+    pending_confirmation: Optional[dict[str, Any]] = None
     id: str = field(default_factory=lambda: str(uuid4()))
     status: RunStatus = RunStatus.QUEUED
     created_at: str = field(default_factory=utc_now)

@@ -22,6 +22,7 @@ from .models import (
     MessageRole,
     RuntimeEventRecord,
     RuntimeRun,
+    RuntimeRunContext,
     RuntimeStepRun,
     ScheduledJob,
     SchemaMigration,
@@ -57,7 +58,7 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 def _record_schema_version() -> None:
@@ -375,6 +376,15 @@ def upsert_runtime_run(value: dict[str, Any]) -> RuntimeRun:
         ):
             setattr(record, field_name, value.get(field_name))
         db.add(record)
+        context = db.get(RuntimeRunContext, value["id"]) or RuntimeRunContext(
+            run_id=value["id"]
+        )
+        context.run_type = value.get("run_type", "agent")
+        context.skill_id = value.get("skill_id")
+        context.skill_version = value.get("skill_version")
+        context.execution_mode = value.get("execution_mode")
+        context.inputs = json.dumps(value.get("inputs", {}), ensure_ascii=False)
+        db.add(context)
         db.commit()
         db.refresh(record)
         return record
@@ -424,6 +434,19 @@ def save_runtime_event(value: dict[str, Any]) -> RuntimeEventRecord:
 def get_runtime_run(run_id: str) -> Optional[RuntimeRun]:
     with DBSession(get_engine()) as db:
         return db.get(RuntimeRun, run_id)
+
+
+def get_runtime_run_context(run_id: str) -> Optional[RuntimeRunContext]:
+    with DBSession(get_engine()) as db:
+        return db.get(RuntimeRunContext, run_id)
+
+
+def list_runtime_run_contexts(run_ids: list[str]) -> list[RuntimeRunContext]:
+    if not run_ids:
+        return []
+    with DBSession(get_engine()) as db:
+        statement = select(RuntimeRunContext).where(RuntimeRunContext.run_id.in_(run_ids))
+        return list(db.exec(statement).all())
 
 
 def list_runtime_runs(limit: int = 50) -> list[RuntimeRun]:

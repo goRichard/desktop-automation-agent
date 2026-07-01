@@ -135,3 +135,32 @@ def test_runtime_persistence_hooks() -> None:
         assert persistence.events[-1]["type"] == "run.completed"
 
     asyncio.run(check())
+
+
+def test_confirmation_requires_explicit_resolution() -> None:
+    async def check() -> None:
+        run = RunController("session", "demo", run_id="run-confirm")
+        await run.initialize()
+        await run.transition(RunStatus.PREPARING)
+        await run.transition(RunStatus.RUNNING)
+
+        request = asyncio.create_task(
+            run.request_confirmation({"stepId": "send", "risk": "external_side_effect"})
+        )
+        await asyncio.sleep(0)
+        assert run.state.status == RunStatus.WAITING_USER
+        assert run.state.pending_confirmation["stepId"] == "send"
+
+        try:
+            await run.resume()
+        except RuntimeError as error:
+            assert str(error) == "Run is not paused"
+        else:
+            raise AssertionError("resume bypassed explicit confirmation")
+
+        await run.confirm(True)
+        assert await request is True
+        assert run.state.status == RunStatus.RUNNING
+        assert run.state.pending_confirmation is None
+
+    asyncio.run(check())

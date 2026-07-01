@@ -604,6 +604,8 @@ run.queued
 run.started
 run.paused
 run.waiting_user
+run.confirmation_requested
+run.confirmation_resolved
 run.completed
 run.failed
 step.started

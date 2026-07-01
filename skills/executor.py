@@ -8,14 +8,15 @@ import re
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, Optional
 
-from runtime.controller import RunController
+from runtime.controller import RunCancelled, RunController
 from runtime.lock import desktop_execution_lock
 from tools.registry import get_tool
 
-from .schema import InputType, SkillDocument, SkillStep
+from .schema import ExecutionMode, InputType, SkillDocument, SkillStep
 
 AgentRunner = Callable[[str, list[str]], Awaitable[Any]]
 ScriptRunner = Callable[[str, dict[str, Any]], Awaitable[Any]]
+ConfirmationRunner = Callable[[dict[str, Any]], Awaitable[bool]]
 
 ACTION_TO_TOOL = {
     "app.launch": "app_launch",
@@ -35,6 +36,7 @@ ACTION_TO_TOOL = {
     "browser.type": "browser_type",
     "browser.key": "browser_press_key",
     "browser.scroll": "browser_scroll",
+    "vision.locate": "find_element",
     "file.read": "read_file",
     "file.write": "write_file",
     "powershell.runApproved": "approved_powershell_script",
@@ -52,25 +54,46 @@ class SkillExecutor:
         self,
         agent_runner: Optional[AgentRunner] = None,
         script_runner: Optional[ScriptRunner] = None,
+        confirmation_runner: Optional[ConfirmationRunner] = None,
     ):
         self.agent_runner = agent_runner
         self.script_runner = script_runner
+        self.confirmation_runner = confirmation_runner
 
     async def execute(
         self,
         document: SkillDocument,
         inputs: dict[str, Any],
         controller: Optional[RunController] = None,
+        mode: Optional[ExecutionMode] = None,
+        unattended_approved: bool = False,
     ) -> dict[str, Any]:
-        values = self._validate_inputs(document, inputs)
-        context: dict[str, Any] = {"input": values, "steps": {}}
+        values = self.validate_inputs(document, inputs)
+        execution_mode = ExecutionMode(mode or document.execution.default_mode)
+        context: dict[str, Any] = {
+            "input": values,
+            "steps": {},
+            "approvals": {"external_side_effect": unattended_approved},
+        }
         results: list[dict[str, Any]] = []
 
         async with self._desktop_lock(controller):
             for step in document.execution.steps:
                 if controller:
                     await controller.checkpoint()
-                result = await self._execute_step(step, context, controller)
+                if step.action == "user.confirm":
+                    result = await self._confirmation_step(
+                        step,
+                        context,
+                        controller,
+                        execution_mode,
+                        unattended_approved,
+                    )
+                else:
+                    await self._confirm_before_step(
+                        step, context, execution_mode, unattended_approved
+                    )
+                    result = await self._execute_step(step, context, controller)
                 results.append(result)
                 context["steps"][step.id] = result
                 if not result["success"] and step.on_failure == "stop":
@@ -81,9 +104,89 @@ class SkillExecutor:
         return {
             "skillId": document.metadata.id,
             "version": document.metadata.version,
+            "mode": execution_mode.value,
             "success": all(item["success"] for item in results),
             "steps": results,
         }
+
+    async def _confirmation_step(
+        self,
+        step: SkillStep,
+        context: dict[str, Any],
+        controller: Optional[RunController],
+        mode: ExecutionMode,
+        unattended_approved: bool,
+    ) -> dict[str, Any]:
+        runtime_step = None
+        if controller:
+            runtime_step = await controller.start_step(step.name, ["user.confirm"])
+        skip_unattended = bool(
+            mode == ExecutionMode.UNATTENDED
+            and unattended_approved
+            and step.policy
+            and step.policy.skip_when == "unattendedApproved"
+        )
+        if mode == ExecutionMode.UNATTENDED and not skip_unattended:
+            raise SkillExecutionError(
+                f"Unattended Skill cannot wait for confirmation: {step.id}"
+            )
+        approved = skip_unattended or await self._request_confirmation(step, "explicit")
+        if approved:
+            context["approvals"]["external_side_effect"] = True
+        result = {
+            "id": step.id,
+            "name": step.name,
+            "action": step.action,
+            "tool": "user.confirm",
+            "attempts": 1,
+            "success": approved,
+            "output": "approved" if approved else "rejected",
+        }
+        if controller and runtime_step:
+            await controller.finish_step(
+                runtime_step,
+                success=approved,
+                result=result["output"] if approved else None,
+                error=None if approved else "User rejected the step",
+            )
+        return result
+
+    async def _confirm_before_step(
+        self,
+        step: SkillStep,
+        context: dict[str, Any],
+        mode: ExecutionMode,
+        unattended_approved: bool,
+    ) -> None:
+        if mode == ExecutionMode.UNATTENDED:
+            if step.risk == "external_side_effect" and not unattended_approved:
+                raise SkillExecutionError(
+                    f"Unattended external side effect is not approved: {step.id}"
+                )
+            return
+        if mode == ExecutionMode.STEP:
+            if not await self._request_confirmation(step, "step_mode"):
+                raise SkillExecutionError(f"User rejected Skill step: {step.id}")
+            return
+        if step.risk in {"high", "external_side_effect"}:
+            if context["approvals"].get("external_side_effect"):
+                context["approvals"]["external_side_effect"] = False
+                return
+            if not await self._request_confirmation(step, "risk"):
+                raise SkillExecutionError(f"User rejected high-risk Skill step: {step.id}")
+
+    async def _request_confirmation(self, step: SkillStep, reason: str) -> bool:
+        if self.confirmation_runner is None:
+            raise SkillExecutionError(f"Skill step requires user confirmation: {step.id}")
+        return await self.confirmation_runner(
+            {
+                "stepId": step.id,
+                "name": step.name,
+                "action": step.action,
+                "risk": step.risk,
+                "reason": reason,
+            }
+        )
 
     async def _execute_step(
         self,
@@ -120,6 +223,8 @@ class SkillExecutor:
                         result=self._result_text(output),
                     )
                 return result
+            except RunCancelled:
+                raise
             except Exception as error:
                 last_error = str(error)
                 if attempt < step.retry.max_attempts and step.retry.delay_seconds:
@@ -151,6 +256,8 @@ class SkillExecutor:
                         result=self._result_text(output),
                     )
                 return result
+            except RunCancelled:
+                raise
             except Exception as error:
                 last_error = f"{last_error}; fallback failed: {error}"
 
@@ -239,7 +346,7 @@ class SkillExecutor:
             raise SkillExecutionError(f"Unsupported verification type: {step.verify.type}")
 
     @staticmethod
-    def _validate_inputs(document: SkillDocument, supplied: dict[str, Any]) -> dict[str, Any]:
+    def validate_inputs(document: SkillDocument, supplied: dict[str, Any]) -> dict[str, Any]:
         unknown = set(supplied) - set(document.inputs)
         if unknown:
             raise SkillExecutionError(f"Unknown Skill inputs: {', '.join(sorted(unknown))}")

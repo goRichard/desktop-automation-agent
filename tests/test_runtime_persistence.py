@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
-from memory import get_runtime_run, init_db, list_runtime_events, list_runtime_steps
+from memory import (
+    get_runtime_run,
+    get_runtime_run_context,
+    init_db,
+    list_runtime_events,
+    list_runtime_steps,
+)
 from runtime import RunController, RunStatus, get_runtime_persistence
 
 
@@ -15,6 +21,11 @@ def test_runtime_state_is_persisted(tmp_path) -> None:
             "persist me",
             run_id="persisted-run",
             persistence=get_runtime_persistence(),
+            run_type="skill",
+            skill_id="demo-skill",
+            skill_version="1.0.0",
+            execution_mode="guided",
+            inputs={"name": "demo"},
         )
         await run.initialize()
         await run.transition(RunStatus.PREPARING)
@@ -30,5 +41,10 @@ def test_runtime_state_is_persisted(tmp_path) -> None:
     assert record is not None
     assert record.status == "succeeded"
     assert record.output == "done"
+    context = get_runtime_run_context("persisted-run")
+    assert context is not None
+    assert context.skill_id == "demo-skill"
+    assert context.skill_version == "1.0.0"
+    assert context.inputs == '{"name": "demo"}'
     assert len(list_runtime_steps("persisted-run")) == 1
     assert len(list_runtime_events("persisted-run")) >= 5

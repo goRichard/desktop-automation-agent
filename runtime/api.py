@@ -6,11 +6,11 @@ import hmac
 import os
 import secrets
 from contextlib import asynccontextmanager
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi import WebSocketDisconnect, status
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from config import configure_secret_resolver, get_settings, reload_settings
 from config.model_provider import ModelProviderConfig, ModelRole, default_capabilities
@@ -24,21 +24,45 @@ from llm import get_llm_client, reset_llm_client
 from memory import init_db
 from scheduler import shutdown_scheduler, start_scheduler
 from skills import list_skills, load_skills
+from skills.executor import SkillExecutionError, SkillExecutor
 from skills.repository import SkillConflictError, SkillNotFoundError, SkillRepository
-from skills.schema import SkillDocument
+from skills.schema import ExecutionMode, SkillDocument, SkillStatus
 
 from .lock import desktop_execution_lock
 from .manager import RuntimeConfigurationBusy, RuntimeManager
 
 
 class CreateRunRequest(BaseModel):
-    user_input: str = Field(min_length=1)
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_input: Optional[str] = Field(default=None, min_length=1)
     session_id: Optional[str] = None
     confirmed_plan: Optional[str] = None
+    skill_id: Optional[str] = Field(default=None, alias="skillId")
+    skill_version: Optional[str] = Field(default=None, alias="skillVersion")
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    mode: Optional[ExecutionMode] = None
+    external_side_effects_approved: bool = Field(
+        default=False, alias="externalSideEffectsApproved"
+    )
+
+    @model_validator(mode="after")
+    def select_run_type(self) -> "CreateRunRequest":
+        if bool(self.user_input) == bool(self.skill_id):
+            raise ValueError("Provide exactly one of user_input or skillId")
+        if self.skill_version and not self.skill_id:
+            raise ValueError("skillVersion requires skillId")
+        if self.confirmed_plan and self.skill_id:
+            raise ValueError("confirmed_plan is only valid for Agent Runs")
+        return self
 
 
 class CancelRunRequest(BaseModel):
     reason: str = "Cancelled by user"
+
+
+class ConfirmRunRequest(BaseModel):
+    approved: bool
 
 
 class CredentialRequest(BaseModel):
@@ -110,7 +134,15 @@ def create_app(
     @app.get("/runtime/capabilities", dependencies=[Depends(require_token)])
     async def capabilities() -> dict:
         return {
-            "runs": ["start", "pause", "resume", "cancel", "history"],
+            "runs": [
+                "start_agent",
+                "start_skill",
+                "pause",
+                "resume",
+                "confirm",
+                "cancel",
+                "history",
+            ],
             "events": ["history", "websocket"],
             "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
             "models": [
@@ -256,7 +288,7 @@ def create_app(
             )
         except ValueError as error:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
             ) from error
 
     @app.post("/models/{role}/health", dependencies=[Depends(require_token)])
@@ -328,13 +360,36 @@ def create_app(
     )
     async def create_run(payload: CreateRunRequest) -> dict:
         try:
+            if payload.skill_id:
+                document, mode = _resolve_skill_run(
+                    skill_repository,
+                    payload.skill_id,
+                    payload.skill_version,
+                    payload.mode,
+                )
+                try:
+                    SkillExecutor.validate_inputs(document, payload.inputs)
+                except SkillExecutionError as error:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=str(error),
+                    ) from error
+                return await manager.start_skill_run(
+                    document,
+                    payload.inputs,
+                    mode,
+                    session_id=payload.session_id,
+                    unattended_approved=payload.external_side_effects_approved,
+                )
             return await manager.start_run(
-                user_input=payload.user_input,
+                user_input=payload.user_input or "",
                 session_id=payload.session_id,
                 confirmed_plan=payload.confirmed_plan,
             )
         except LookupError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+        except SkillConflictError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
 
     @app.get("/runs", dependencies=[Depends(require_token)])
     async def list_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
@@ -372,6 +427,10 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
         except RuntimeError as error:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+
+    @app.post("/runs/{run_id}/confirm", dependencies=[Depends(require_token)])
+    async def confirm_run(run_id: str, payload: ConfirmRunRequest) -> dict:
+        return await _control(manager.confirm, run_id, payload.approved)
 
     @app.websocket("/events")
     async def events_socket(
@@ -412,9 +471,9 @@ def create_app(
     return app
 
 
-async def _control(handler, run_id: str) -> dict:
+async def _control(handler, run_id: str, *args) -> dict:
     try:
-        return await handler(run_id)
+        return await handler(run_id, *args)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     except RuntimeError as error:
@@ -446,6 +505,38 @@ def _skill_operation(handler, *args) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SkillConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+def _resolve_skill_run(
+    repository: SkillRepository,
+    skill_id: str,
+    version: Optional[str],
+    requested_mode: Optional[ExecutionMode],
+) -> tuple[SkillDocument, ExecutionMode]:
+    if version is None:
+        skill = repository.get(skill_id)
+        version = skill.get("publishedVersion")
+        if not version:
+            raise SkillConflictError(f"Skill has no published version: {skill_id}")
+    value = repository.get_version(skill_id, version)
+    document = SkillDocument.model_validate(value["document"])
+    mode = requested_mode or document.execution.default_mode
+    status_value = SkillStatus(value["status"])
+    allowed = {
+        ExecutionMode.STEP: {
+            SkillStatus.DRAFT,
+            SkillStatus.TESTING,
+            SkillStatus.VALIDATED,
+            SkillStatus.PUBLISHED,
+        },
+        ExecutionMode.GUIDED: {SkillStatus.VALIDATED, SkillStatus.PUBLISHED},
+        ExecutionMode.UNATTENDED: {SkillStatus.PUBLISHED},
+    }
+    if status_value not in allowed[mode]:
+        raise SkillConflictError(
+            f"Skill {skill_id}@{version} status {status_value.value} cannot run in {mode.value} mode"
+        )
+    return document, mode
 
 
 def main() -> None:

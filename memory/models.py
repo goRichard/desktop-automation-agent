@@ -172,6 +172,17 @@ class RuntimeRun(SQLModel, table=True):
     output: str = ""
 
 
+class RuntimeRunContext(SQLModel, table=True):
+    __tablename__ = "runtime_run_contexts"
+
+    run_id: str = Field(foreign_key="runtime_runs.id", primary_key=True)
+    run_type: str = Field(default="agent", index=True)
+    skill_id: Optional[str] = Field(default=None, index=True)
+    skill_version: Optional[str] = None
+    execution_mode: Optional[str] = None
+    inputs: str = Field(default="{}", description="JSON encoded Skill inputs")
+
+
 class RuntimeStepRun(SQLModel, table=True):
     __tablename__ = "runtime_step_runs"
 

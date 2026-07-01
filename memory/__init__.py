@@ -8,6 +8,7 @@ from .models import (
     MessageRole,
     RuntimeEventRecord,
     RuntimeRun,
+    RuntimeRunContext,
     RuntimeStepRun,
     ScheduledJob,
     Session,
@@ -25,11 +26,13 @@ from .store import (
     get_session,
     init_db,
     get_runtime_run,
+    get_runtime_run_context,
     list_job_logs,
     list_jobs,
     list_memories,
     list_sessions,
     list_runtime_events,
+    list_runtime_run_contexts,
     list_runtime_runs,
     list_runtime_steps,
     messages_to_openai_format,
@@ -48,7 +51,7 @@ __all__ = [
     # models
     "Session", "Message", "ScheduledJob", "JobExecutionLog", "AgentMemory",
     "MessageRole", "JobStatus", "ExecutionStatus", "MemoryCategory",
-    "RuntimeRun", "RuntimeStepRun", "RuntimeEventRecord",
+    "RuntimeRun", "RuntimeRunContext", "RuntimeStepRun", "RuntimeEventRecord",
     # store
     "init_db", "get_engine",
     "create_session", "get_session", "list_sessions", "update_session_title",
@@ -57,5 +60,6 @@ __all__ = [
     "start_execution_log", "finish_execution_log", "list_job_logs",
     "set_memory", "get_memory", "list_memories", "delete_memory", "format_memories_for_prompt",
     "upsert_runtime_run", "upsert_runtime_step", "save_runtime_event",
-    "get_runtime_run", "list_runtime_runs", "list_runtime_steps", "list_runtime_events",
+    "get_runtime_run", "get_runtime_run_context", "list_runtime_runs",
+    "list_runtime_run_contexts", "list_runtime_steps", "list_runtime_events",
 ]

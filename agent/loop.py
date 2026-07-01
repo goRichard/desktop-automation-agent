@@ -184,6 +184,8 @@ class AgentLoop:
         confirmed_plan: Optional[str] = None,
         on_token: Optional[Any] = None,
         controller: Optional[RunController] = None,
+        allowed_tool_names: Optional[set[str]] = None,
+        finalize_run: bool = True,
     ) -> AsyncGenerator[str, None]:
         """
         流式版本：先用非流式检测工具调用（多轮），最终回复用流式输出。
@@ -213,6 +215,11 @@ class AgentLoop:
         # 会包含同一条输入两次。
         save_message(self.session_id, role=MessageRole.user, content=user_input)
         tools = get_all_schemas()
+        if allowed_tool_names:
+            tools = [
+                schema for schema in tools
+                if schema["function"]["name"] in allowed_tool_names
+            ]
 
 
         # ── 任务执行阶段 ───────────────────────────────────
@@ -282,10 +289,24 @@ class AgentLoop:
                     if on_tool_call:
                         await _maybe_await(on_tool_call(tc.name, tc.arguments))
 
+                unauthorized_tools = (
+                    [
+                        tool_call.name for tool_call in response.tool_calls
+                        if tool_call.name not in allowed_tool_names
+                    ]
+                    if allowed_tool_names is not None
+                    else []
+                )
+                tool_policy_error = (
+                    f"Skill Agent step does not allow tools: {unauthorized_tools}"
+                    if unauthorized_tools
+                    else None
+                )
                 plan_policy_error = self._begin_plan_step(response.tool_calls)
-                if plan_policy_error:
+                policy_error = tool_policy_error or plan_policy_error
+                if policy_error:
                     tool_results = tool_dispatcher.rejected(
-                        response.tool_calls, plan_policy_error
+                        response.tool_calls, policy_error
                     )
                 else:
                     tool_results = await tool_dispatcher.execute(response.tool_calls)
@@ -293,7 +314,7 @@ class AgentLoop:
                 # ── 步骤验证：用多模态模型检查操作是否成功 ──
                 if (
                     confirmed_plan
-                    and not plan_policy_error
+                    and not policy_error
                     and all(result.get("success", True) for result in tool_results)
                     and self._should_verify(response.tool_calls)
                 ):
@@ -394,7 +415,8 @@ class AgentLoop:
                     role=MessageRole.assistant,
                     content=full_response,
                 )
-                await controller.succeed()
+                if finalize_run:
+                    await controller.succeed()
                 return
 
         message = f"已达到最大迭代次数 {self.settings.max_iterations}"
@@ -402,6 +424,26 @@ class AgentLoop:
         await controller.emit("run.output", {"delta": f"\n[{message}]"})
         await controller.fail(message)
         yield f"\n[{message}]"
+
+    async def execute_instruction(
+        self,
+        instruction: str,
+        controller: RunController,
+        allowed_tool_names: Optional[set[str]] = None,
+    ) -> str:
+        """Execute one Agent-backed Skill step inside an existing controlled Run."""
+        self.current_run = controller
+        output = ""
+        async for token in self._execute_stream(
+            user_input=instruction,
+            controller=controller,
+            allowed_tool_names=allowed_tool_names,
+            finalize_run=False,
+        ):
+            output += token
+        if controller.state.status == RunStatus.FAILED:
+            raise RuntimeError(controller.state.error or "Agent Skill step failed")
+        return output
 
     async def pause_current_run(self) -> None:
         if self.current_run is None:

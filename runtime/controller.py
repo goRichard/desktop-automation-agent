@@ -47,8 +47,21 @@ class RunController:
         event_bus: Optional[EventBus] = None,
         run_id: Optional[str] = None,
         persistence: Optional[RuntimePersistence] = None,
+        run_type: str = "agent",
+        skill_id: Optional[str] = None,
+        skill_version: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+        inputs: Optional[dict[str, Any]] = None,
     ):
-        self.state = RunState(session_id=session_id, user_input=user_input)
+        self.state = RunState(
+            session_id=session_id,
+            user_input=user_input,
+            run_type=run_type,
+            skill_id=skill_id,
+            skill_version=skill_version,
+            execution_mode=execution_mode,
+            inputs=inputs or {},
+        )
         if run_id:
             self.state.id = run_id
         self.events = event_bus or EventBus()
@@ -56,6 +69,8 @@ class RunController:
         self._sequence = 0
         self._resume_gate = asyncio.Event()
         self._resume_gate.set()
+        self._confirmation_gate = asyncio.Event()
+        self._confirmation_result: Optional[bool] = None
 
     async def initialize(self) -> None:
         await self._persist_run()
@@ -103,8 +118,8 @@ class RunController:
         await self.transition(RunStatus.PAUSED)
 
     async def resume(self) -> None:
-        if self.state.status not in (RunStatus.PAUSED, RunStatus.WAITING_USER):
-            raise RuntimeError("Run is not paused or waiting for user input")
+        if self.state.status != RunStatus.PAUSED:
+            raise RuntimeError("Run is not paused")
         self._resume_gate.set()
         await self.transition(RunStatus.RUNNING)
 
@@ -112,6 +127,9 @@ class RunController:
         if self.state.is_terminal:
             return
         self._resume_gate.set()
+        self._confirmation_result = False
+        self._confirmation_gate.set()
+        self.state.pending_confirmation = None
         for step in self.state.steps:
             if step.status == StepStatus.RUNNING:
                 step.status = StepStatus.SKIPPED
@@ -120,6 +138,31 @@ class RunController:
                 await self._persist_step(step)
                 await self.emit("step.skipped", {"step": step.to_dict()})
         await self.transition(RunStatus.CANCELLED, error=reason)
+
+    async def request_confirmation(self, details: dict[str, Any]) -> bool:
+        if self.state.status != RunStatus.RUNNING:
+            raise RuntimeError("Confirmation can only be requested by a running Run")
+        self._confirmation_result = None
+        self._confirmation_gate.clear()
+        self.state.pending_confirmation = details
+        await self.transition(RunStatus.WAITING_USER)
+        await self.emit("run.confirmation_requested", {"confirmation": details})
+        await self._confirmation_gate.wait()
+        if self.state.status == RunStatus.CANCELLED:
+            raise RunCancelled(self.state.error or "Run cancelled")
+        approved = bool(self._confirmation_result)
+        self.state.pending_confirmation = None
+        await self.transition(RunStatus.RUNNING)
+        await self.emit("run.confirmation_resolved", {"approved": approved})
+        return approved
+
+    async def confirm(self, approved: bool) -> None:
+        if self.state.status != RunStatus.WAITING_USER:
+            raise RuntimeError("Run is not waiting for confirmation")
+        if self._confirmation_result is not None:
+            raise RuntimeError("Run confirmation has already been resolved")
+        self._confirmation_result = approved
+        self._confirmation_gate.set()
 
     async def checkpoint(self) -> None:
         if self.state.status == RunStatus.CANCELLED:

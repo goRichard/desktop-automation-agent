@@ -128,6 +128,7 @@ GET  /runs/{id}
 GET  /runs/{id}/events
 POST /runs/{id}/pause
 POST /runs/{id}/resume
+POST /runs/{id}/confirm
 POST /runs/{id}/cancel
 WS   /events
 POST /skills
@@ -145,6 +146,22 @@ DELETE /models/{chat|vision}/credential
 POST /models/{chat|vision}/health?probe=configuration|models|request|tool_calling|vision
 POST /certificates/import
 ```
+
+执行已发布 Skill：
+
+```json
+{
+  "skillId": "send_outlook_email",
+  "skillVersion": "1.0.0",
+  "inputs": {"recipient": "team@example.com"},
+  "mode": "guided"
+}
+```
+
+省略 `skillVersion` 时使用当前 published 版本。`step` 模式会在每个步骤前进入
+`waiting_user`，由 `/runs/{id}/confirm` 继续；`unattended` 只允许 published 固定版本，
+外部副作用还必须显式提供 `externalSideEffectsApproved: true`。Run 历史会保存 Skill ID、
+版本、模式和输入参数。
 
 Skill 生命周期为 `draft → validated → published → deprecated`。只有 draft 可原地编辑；
 已发布内容必须通过新版本更新。确定性步骤通过工具注册表执行，Windows 桌面原子操作仍由

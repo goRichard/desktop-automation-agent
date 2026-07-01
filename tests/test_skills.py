@@ -183,3 +183,56 @@ async def test_skill_executor_uses_declared_agent_fallback(monkeypatch) -> None:
     )
     assert result["steps"][0]["fallback"] is True
     assert fallback_calls == [("Recover person@example.com", ["ui.inspect", "ui.click"])]
+
+
+@pytest.mark.asyncio
+async def test_skill_executor_step_mode_and_unattended_policy(monkeypatch) -> None:
+    monkeypatch.setattr("skills.executor.get_tool", lambda _: lambda **__: "ok")
+    value = skill_value()
+    value["execution"]["steps"] = [
+        {
+            "id": "send",
+            "name": "Send",
+            "action": "ui.click",
+            "with": {"target": "Send"},
+            "risk": "external_side_effect",
+        }
+    ]
+    document = SkillDocument.model_validate(value)
+    confirmations = []
+
+    async def confirm(details):
+        confirmations.append(details)
+        return True
+
+    result = await SkillExecutor(confirmation_runner=confirm).execute(
+        document,
+        {"recipient": "person@example.com"},
+        mode="step",
+    )
+    assert result["success"] is True
+    assert confirmations[0]["reason"] == "step_mode"
+
+    with pytest.raises(SkillExecutionError, match="not approved"):
+        await SkillExecutor().execute(
+            document,
+            {"recipient": "person@example.com"},
+            mode="unattended",
+        )
+
+    value["execution"]["steps"].insert(
+        0,
+        {
+            "id": "approval",
+            "name": "Approve send",
+            "action": "user.confirm",
+            "policy": {"skipWhen": "unattendedApproved"},
+        },
+    )
+    unattended = await SkillExecutor().execute(
+        SkillDocument.model_validate(value),
+        {"recipient": "person@example.com"},
+        mode="unattended",
+        unattended_approved=True,
+    )
+    assert unattended["steps"][0]["output"] == "approved"
