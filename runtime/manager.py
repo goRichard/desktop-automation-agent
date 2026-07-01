@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from .controller import RunController
 from .events import EventBus
 from .persistence import RuntimePersistence, get_runtime_persistence
+
+
+class RuntimeConfigurationBusy(RuntimeError):
+    pass
 
 
 @dataclass
@@ -27,6 +32,7 @@ class RuntimeManager:
         self.events = event_bus or EventBus(history_limit=5000)
         self.persistence = persistence or get_runtime_persistence()
         self._runs: dict[str, ManagedRun] = {}
+        self._lifecycle_lock = asyncio.Lock()
 
     async def start_run(
         self,
@@ -34,24 +40,25 @@ class RuntimeManager:
         session_id: Optional[str] = None,
         confirmed_plan: Optional[str] = None,
     ) -> dict[str, Any]:
-        from agent import AgentLoop
-        from memory import get_session
+        async with self._lifecycle_lock:
+            from agent import AgentLoop
+            from memory import get_session
 
-        if session_id and await asyncio.to_thread(get_session, session_id) is None:
-            raise LookupError(f"Session not found: {session_id}")
+            if session_id and await asyncio.to_thread(get_session, session_id) is None:
+                raise LookupError(f"Session not found: {session_id}")
 
-        loop = AgentLoop(session_id=session_id, event_bus=self.events)
-        controller = RunController(
-            session_id=loop.session_id,
-            user_input=user_input,
-            event_bus=self.events,
-            persistence=self.persistence,
-        )
-        task = asyncio.create_task(
-            self._consume_run(loop, controller, user_input, confirmed_plan),
-            name=f"flowpilot-run-{controller.state.id}",
-        )
-        self._runs[controller.state.id] = ManagedRun(controller, loop, task)
+            loop = AgentLoop(session_id=session_id, event_bus=self.events)
+            controller = RunController(
+                session_id=loop.session_id,
+                user_input=user_input,
+                event_bus=self.events,
+                persistence=self.persistence,
+            )
+            task = asyncio.create_task(
+                self._consume_run(loop, controller, user_input, confirmed_plan),
+                name=f"flowpilot-run-{controller.state.id}",
+            )
+            self._runs[controller.state.id] = ManagedRun(controller, loop, task)
         await asyncio.sleep(0)
         return controller.state.to_dict()
 
@@ -90,6 +97,20 @@ class RuntimeManager:
 
     def get_active(self, run_id: str) -> Optional[ManagedRun]:
         return self._runs.get(run_id)
+
+    @property
+    def has_active_runs(self) -> bool:
+        return any(not run.task.done() for run in self._runs.values())
+
+    @asynccontextmanager
+    async def configuration_change(self):
+        """Block new Runs while model configuration and providers are swapped."""
+        async with self._lifecycle_lock:
+            if self.has_active_runs:
+                raise RuntimeConfigurationBusy(
+                    "Model settings cannot change while a Run is active"
+                )
+            yield
 
     async def get_run(self, run_id: str) -> Optional[dict[str, Any]]:
         managed = self._runs.get(run_id)

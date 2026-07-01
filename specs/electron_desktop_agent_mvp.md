@@ -563,7 +563,11 @@ GET    /health
 GET    /runtime/capabilities
 GET    /runtime/environment
 GET    /models
+PUT    /models/{chat|vision}
+PUT    /models/{chat|vision}/credential
+DELETE /models/{chat|vision}/credential
 POST   /models/{chat|vision}/health
+POST   /certificates/import
 
 GET    /skills
 POST   /skills

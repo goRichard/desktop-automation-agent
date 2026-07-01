@@ -1,6 +1,7 @@
 """Local HTTP and WebSocket API for the Electron application."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 import secrets
@@ -9,10 +10,16 @@ from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi import WebSocketDisconnect, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from config import get_settings
-from config.model_provider import ModelRole
+from config import configure_secret_resolver, get_settings, reload_settings
+from config.model_provider import ModelProviderConfig, ModelRole, default_capabilities
+from config.service import ModelConfigurationService
+from credentials import (
+    CredentialStoreUnavailable,
+    SecretStore,
+    get_default_secret_store,
+)
 from llm import get_llm_client, reset_llm_client
 from memory import init_db
 from scheduler import shutdown_scheduler, start_scheduler
@@ -21,7 +28,7 @@ from skills.repository import SkillConflictError, SkillNotFoundError, SkillRepos
 from skills.schema import SkillDocument
 
 from .lock import desktop_execution_lock
-from .manager import RuntimeManager
+from .manager import RuntimeConfigurationBusy, RuntimeManager
 
 
 class CreateRunRequest(BaseModel):
@@ -34,10 +41,29 @@ class CancelRunRequest(BaseModel):
     reason: str = "Cancelled by user"
 
 
-def create_app(token: Optional[str] = None) -> FastAPI:
+class CredentialRequest(BaseModel):
+    secret: SecretStr = Field(min_length=1)
+
+
+class CertificateImportRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_path: str = Field(alias="sourcePath", min_length=1)
+    display_name: str = Field(default="internal-ca", alias="displayName")
+
+
+def create_app(
+    token: Optional[str] = None,
+    credential_store: Optional[SecretStore] = None,
+) -> FastAPI:
     runtime_token = token or os.environ.get("FLOWPILOT_RUNTIME_TOKEN") or secrets.token_urlsafe(32)
     manager = RuntimeManager()
     skill_repository = SkillRepository()
+    secret_store = credential_store or get_default_secret_store()
+    configure_secret_resolver(secret_store.get)
+    settings = reload_settings()
+    model_configurations = ModelConfigurationService(settings.config_path)
+    model_settings_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -54,6 +80,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
         finally:
             await manager.shutdown()
             await reset_llm_client()
+            configure_secret_resolver(None)
             shutdown_scheduler()
 
     app = FastAPI(
@@ -64,6 +91,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
     app.state.runtime_token = runtime_token
     app.state.runtime_manager = manager
     app.state.skill_repository = skill_repository
+    app.state.credential_store = secret_store
 
     async def require_token(
         x_runtime_token: Optional[str] = Header(default=None),
@@ -85,7 +113,13 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             "runs": ["start", "pause", "resume", "cancel", "history"],
             "events": ["history", "websocket"],
             "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
-            "models": ["inspect", "health_check"],
+            "models": [
+                "inspect",
+                "configure",
+                "manage_credential",
+                "import_ca_bundle",
+                "health_check",
+            ],
             "desktop": {"provider": "winpeekaboo", "maxConcurrentRuns": 1},
             "browser": {"provider": "playwright", "channel": "msedge"},
         }
@@ -109,12 +143,129 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             "vision": settings.vision_model.public_dict(),
         }
 
+    @app.put("/models/{role}", dependencies=[Depends(require_token)])
+    async def update_model_provider(role: ModelRole, config: ModelProviderConfig) -> dict:
+        if "capabilities" not in config.model_fields_set:
+            config.capabilities = default_capabilities(role, config.provider)
+        async with model_settings_lock:
+            try:
+                async with manager.configuration_change():
+                    await asyncio.to_thread(model_configurations.save_model, role, config)
+                    await reset_llm_client()
+                    refreshed = reload_settings()
+                    selected = (
+                        refreshed.chat_model
+                        if role == ModelRole.CHAT
+                        else refreshed.vision_model
+                    )
+                    return selected.public_dict()
+            except RuntimeConfigurationBusy as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail=str(error)
+                ) from error
+
+    @app.put("/models/{role}/credential", dependencies=[Depends(require_token)])
+    async def update_model_credential(role: ModelRole, payload: CredentialRequest) -> dict:
+        async with model_settings_lock:
+            try:
+                async with manager.configuration_change():
+                    settings = get_settings()
+                    config = (
+                        settings.chat_model
+                        if role == ModelRole.CHAT
+                        else settings.vision_model
+                    )
+                    if not config.api_key_secret:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Model configuration does not declare apiKeySecret",
+                        )
+                    try:
+                        await asyncio.to_thread(
+                            secret_store.set,
+                            config.api_key_secret,
+                            payload.secret.get_secret_value(),
+                        )
+                    except CredentialStoreUnavailable as error:
+                        raise HTTPException(
+                            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)
+                        ) from error
+                    await reset_llm_client()
+                    refreshed = reload_settings()
+                    selected = (
+                        refreshed.chat_model
+                        if role == ModelRole.CHAT
+                        else refreshed.vision_model
+                    )
+                    return {
+                        "role": role.value,
+                        "credentialConfigured": bool(selected.resolve_api_key()),
+                    }
+            except RuntimeConfigurationBusy as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail=str(error)
+                ) from error
+
+    @app.delete("/models/{role}/credential", dependencies=[Depends(require_token)])
+    async def delete_model_credential(role: ModelRole) -> dict:
+        async with model_settings_lock:
+            try:
+                async with manager.configuration_change():
+                    settings = get_settings()
+                    config = (
+                        settings.chat_model
+                        if role == ModelRole.CHAT
+                        else settings.vision_model
+                    )
+                    if not config.api_key_secret:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Model configuration does not declare apiKeySecret",
+                        )
+                    try:
+                        deleted = await asyncio.to_thread(
+                            secret_store.delete, config.api_key_secret
+                        )
+                    except CredentialStoreUnavailable as error:
+                        raise HTTPException(
+                            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(error)
+                        ) from error
+                    await reset_llm_client()
+                    reload_settings()
+                    return {
+                        "role": role.value,
+                        "credentialConfigured": False,
+                        "deleted": deleted,
+                    }
+            except RuntimeConfigurationBusy as error:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail=str(error)
+                ) from error
+
+    @app.post(
+        "/certificates/import",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_token)],
+    )
+    async def import_certificate(payload: CertificateImportRequest) -> dict:
+        try:
+            return await asyncio.to_thread(
+                model_configurations.import_ca_bundle,
+                payload.source_path,
+                payload.display_name,
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+            ) from error
+
     @app.post("/models/{role}/health", dependencies=[Depends(require_token)])
     async def model_health(
         role: ModelRole,
         probe: Literal["configuration", "models", "request", "tool_calling", "vision"] = "models",
     ) -> dict:
-        result = await get_llm_client().health_check(role, probe)
+        async with model_settings_lock:
+            result = await get_llm_client().health_check(role, probe)
         if result["status"] == "unhealthy":
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
         return result

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import yaml
 from pydantic import PrivateAttr
@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     @property
     def active_profile(self) -> str:
         return self._raw.get("active_profile", "local")
+
+    @property
+    def config_path(self) -> Path:
+        return self._config_path
 
     @property
     def _current_profile(self) -> dict[str, Any]:
@@ -119,7 +123,9 @@ class Settings(BaseSettings):
                 mode="json", by_alias=True
             )
         config = ModelProviderConfig.model_validate(raw)
-        if config.api_key_env:
+        if config.api_key_secret:
+            config.set_resolved_api_key(_resolve_managed_secret(config.api_key_secret) or "")
+        elif config.api_key_env:
             config.set_resolved_api_key(self._resolve_key(config.api_key_env))
         return config
 
@@ -200,6 +206,7 @@ class Settings(BaseSettings):
 
 # 全局单例
 _settings: Settings | None = None
+_secret_resolver: Optional[Callable[[str], Optional[str]]] = None
 
 
 def get_settings() -> Settings:
@@ -207,6 +214,27 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def reload_settings() -> Settings:
+    global _settings
+    _settings = Settings()
+    return _settings
+
+
+def configure_secret_resolver(
+    resolver: Optional[Callable[[str], Optional[str]]],
+) -> None:
+    global _secret_resolver
+    _secret_resolver = resolver
+
+
+def _resolve_managed_secret(secret_id: str) -> Optional[str]:
+    if _secret_resolver is not None:
+        return _secret_resolver(secret_id)
+    from credentials import get_default_secret_store
+
+    return get_default_secret_store().get(secret_id)
 """
 配置管理：合并 config.yaml（模型/服务配置）和 .env（密钥）
 """

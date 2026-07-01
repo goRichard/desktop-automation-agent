@@ -98,6 +98,7 @@ class ModelProviderConfig(BaseModel):
     )
     api_key_secret: Optional[str] = Field(
         default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$",
         validation_alias=AliasChoices("apiKeySecret", "api_key_secret"),
         serialization_alias="apiKeySecret",
     )
@@ -124,6 +125,9 @@ class ModelProviderConfig(BaseModel):
         """Return UI-safe configuration without resolved credentials."""
         value = self.model_dump(mode="json", by_alias=True, exclude_none=True)
         value["credentialConfigured"] = bool(self.resolve_api_key())
+        value["credentialSource"] = (
+            "managed" if self.api_key_secret else "environment" if self.api_key_env else "none"
+        )
         value.pop("apiKeyEnv", None)
         value.pop("apiKeySecret", None)
         return value

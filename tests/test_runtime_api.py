@@ -3,6 +3,7 @@ from __future__ import annotations
 import yaml
 from fastapi.testclient import TestClient
 
+from credentials import MemorySecretStore
 from tests.test_skills import skill_value
 
 
@@ -40,7 +41,8 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
     from runtime.api import create_app
 
     settings_module._settings = None
-    with TestClient(create_app("secret")) as client:
+    credential_store = MemorySecretStore()
+    with TestClient(create_app("secret", credential_store=credential_store)) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/runtime/capabilities").status_code == 401
 
@@ -49,6 +51,7 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         assert capabilities.status_code == 200
         assert capabilities.json()["desktop"]["provider"] == "winpeekaboo"
         assert "publish" in capabilities.json()["skills"]
+        assert "manage_credential" in capabilities.json()["models"]
 
         environment = client.get("/runtime/environment", headers=headers)
         assert environment.status_code == 200
@@ -65,6 +68,41 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         )
         assert model_health.status_code == 200
         assert model_health.json()["status"] == "healthy"
+
+        updated_model = {
+            "provider": "openai_compatible",
+            "model": "updated-model",
+            "baseUrl": "http://127.0.0.1:2/v1",
+            "apiKeySecret": "models/chat",
+        }
+        updated = client.put("/models/chat", headers=headers, json=updated_model)
+        assert updated.status_code == 200
+        assert updated.json()["model"] == "updated-model"
+        assert updated.json()["capabilities"]["toolCalling"] is True
+        assert updated.json()["credentialConfigured"] is False
+
+        credential = client.put(
+            "/models/chat/credential",
+            headers=headers,
+            json={"secret": "managed-secret-value"},
+        )
+        assert credential.status_code == 200
+        assert credential.json()["credentialConfigured"] is True
+        assert credential_store.get("models/chat") == "managed-secret-value"
+        assert "managed-secret-value" not in config_path.read_text(encoding="utf-8")
+
+        ca_source = tmp_path / "source-ca.pem"
+        ca_source.write_text(
+            "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n",
+            encoding="utf-8",
+        )
+        imported = client.post(
+            "/certificates/import",
+            headers=headers,
+            json={"sourcePath": str(ca_source), "displayName": "internal"},
+        )
+        assert imported.status_code == 201
+        assert imported.json()["fingerprint"]
 
         missing_session = client.post(
             "/runs",
