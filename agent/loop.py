@@ -17,6 +17,13 @@ from memory import (
     save_message,
     update_session_title,
 )
+from runtime import (
+    EventBus,
+    RunCancelled,
+    RunController,
+    RunStatus,
+    desktop_execution_lock,
+)
 from tools import get_all_schemas
 
 from . import context as ctx
@@ -30,7 +37,11 @@ class AgentLoop:
     每次 run() 调用对应一个 Agent 思考-执行-观察的完整过程
     """
 
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(
+        self,
+        session_id: Optional[str] = None,
+        event_bus: Optional[EventBus] = None,
+    ):
         self.settings = get_settings()
         self.llm = get_llm_client()
 
@@ -43,6 +54,8 @@ class AgentLoop:
 
         self._turn_count = 0
         self._plan: Optional[TaskPlan] = None  # P1-3: 计划状态追踪
+        self.event_bus = event_bus or EventBus()
+        self.current_run: Optional[RunController] = None
 
     async def generate_skill_plan(
         self,
@@ -116,12 +129,60 @@ class AgentLoop:
         on_tool_result: Optional[Any] = None,
         confirmed_plan: Optional[str] = None,
         on_token: Optional[Any] = None,
+        run_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """创建受控 Run，串行占用桌面并转发执行输出。"""
+        controller = RunController(
+            session_id=self.session_id,
+            user_input=user_input,
+            event_bus=self.event_bus,
+            run_id=run_id,
+        )
+        self.current_run = controller
+        await controller.initialize()
+
+        try:
+            async with desktop_execution_lock.hold(controller):
+                await controller.checkpoint()
+                await controller.transition(RunStatus.PREPARING)
+                await controller.checkpoint()
+                await controller.transition(RunStatus.RUNNING)
+                await controller.checkpoint()
+                async for token in self._execute_stream(
+                    user_input=user_input,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                    confirmed_plan=confirmed_plan,
+                    on_token=on_token,
+                    controller=controller,
+                ):
+                    yield token
+        except RunCancelled as error:
+            message = f"执行已取消：{error}"
+            yield message
+        except Exception as error:
+            await controller.fail(f"{type(error).__name__}: {error}")
+            raise
+        finally:
+            if not controller.state.is_terminal:
+                await controller.cancel("Run consumer disconnected before completion")
+
+    async def _execute_stream(
+        self,
+        user_input: str,
+        on_tool_call: Optional[Any] = None,
+        on_tool_result: Optional[Any] = None,
+        confirmed_plan: Optional[str] = None,
+        on_token: Optional[Any] = None,
+        controller: Optional[RunController] = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式版本：先用非流式检测工具调用（多轮），最终回复用流式输出。
         confirmed_plan: Plan-First 模式下用户已确认的执行计划，传入后使用建立上下文的约束注入。
         yield str token
         """
+        if controller is None:
+            raise RuntimeError("RunController is required")
         if self._turn_count == 0:
             title = user_input[:20] + ("..." if len(user_input) > 20 else "")
             update_session_title(self.session_id, title)
@@ -147,14 +208,20 @@ class AgentLoop:
 
         # ── 任务执行阶段 ───────────────────────────────────
         for iteration in range(self.settings.max_iterations):
+            await controller.checkpoint()
             try:
                 response = await self.llm.chat(messages, tools=tools)
             except Exception as e:
                 if _is_context_overflow(e):
+                    await controller.fail(_context_overflow_msg())
                     yield f"\n{_context_overflow_msg()}"
                     save_message(self.session_id, role=MessageRole.assistant, content=_context_overflow_msg())
                     return
                 raise
+
+            # 如果在模型请求期间收到取消，不能保存一个缺少 tool result 的
+            # assistant tool_calls 消息，否则后续历史将不符合 OpenAI 协议。
+            await controller.checkpoint()
 
             if response.has_tool_calls:
                 # 工具调用阶段（非流式）
@@ -184,8 +251,21 @@ class AgentLoop:
                 }
                 messages.append(assistant_msg)
 
-                if on_tool_call:
-                    for tc in response.tool_calls:
+                runtime_step = await controller.start_step(
+                    name=self._runtime_step_name(response.tool_calls),
+                    tool_names=[tool_call.name for tool_call in response.tool_calls],
+                )
+
+                for tc in response.tool_calls:
+                    await controller.emit(
+                        "step.tool_called",
+                        {
+                            "stepId": runtime_step.id,
+                            "tool": tc.name,
+                            "arguments": tc.arguments,
+                        },
+                    )
+                    if on_tool_call:
                         await _maybe_await(on_tool_call(tc.name, tc.arguments))
 
                 plan_policy_error = self._begin_plan_step(response.tool_calls)
@@ -219,6 +299,16 @@ class AgentLoop:
                     )
                     if on_tool_result:
                         await _maybe_await(on_tool_result(tr["name"], tr["content"]))
+                    await controller.emit(
+                        "step.tool_result",
+                        {
+                            "stepId": runtime_step.id,
+                            "tool": tr["name"],
+                            "success": tr.get("success", True),
+                            "content": tr["content"],
+                            "error": tr.get("error"),
+                        },
+                    )
 
                 messages.extend(tool_dispatcher.to_openai_messages(tool_results))
 
@@ -226,6 +316,12 @@ class AgentLoop:
                 if self._plan:
                     plan_failure = self._advance_plan(response.tool_calls, tool_results)
                     if plan_failure:
+                        await controller.finish_step(
+                            runtime_step,
+                            success=False,
+                            error=plan_failure,
+                        )
+                        await controller.fail(plan_failure)
                         message = f"计划执行已停止：{plan_failure}"
                         save_message(
                             self.session_id,
@@ -235,6 +331,17 @@ class AgentLoop:
                         yield message
                         return
 
+                step_success = all(
+                    result.get("success", True) for result in tool_results
+                )
+                step_summary = tool_results[-1]["content"][:500] if tool_results else ""
+                await controller.finish_step(
+                    runtime_step,
+                    success=step_success,
+                    result=step_summary if step_success else None,
+                    error=None if step_success else step_summary,
+                )
+
                 continue
 
             else:
@@ -242,10 +349,14 @@ class AgentLoop:
                 full_response = ""
                 try:
                     async for token in self.llm.chat_stream(messages):
+                        await controller.checkpoint()
                         full_response += token
+                        if on_token:
+                            await _maybe_await(on_token(token))
                         yield token
                 except Exception as e:
                     if _is_context_overflow(e):
+                        await controller.fail(_context_overflow_msg())
                         yield f"\n{_context_overflow_msg()}"
                         save_message(
                             self.session_id,
@@ -260,9 +371,27 @@ class AgentLoop:
                     role=MessageRole.assistant,
                     content=full_response,
                 )
+                await controller.succeed()
                 return
 
-        yield f"\n[已达到最大迭代次数 {self.settings.max_iterations}]"
+        message = f"已达到最大迭代次数 {self.settings.max_iterations}"
+        await controller.fail(message)
+        yield f"\n[{message}]"
+
+    async def pause_current_run(self) -> None:
+        if self.current_run is None:
+            raise RuntimeError("当前没有可暂停的 Run")
+        await self.current_run.pause()
+
+    async def resume_current_run(self) -> None:
+        if self.current_run is None:
+            raise RuntimeError("当前没有可继续的 Run")
+        await self.current_run.resume()
+
+    async def cancel_current_run(self, reason: str = "Cancelled by user") -> None:
+        if self.current_run is None:
+            raise RuntimeError("当前没有可取消的 Run")
+        await self.current_run.cancel(reason)
 
     # ── 计划管理 ──
 
@@ -328,6 +457,14 @@ class AgentLoop:
                     f"但模型请求了 {unexpected}"
                 )
         return None
+
+    def _runtime_step_name(self, tool_calls: list) -> str:
+        """为 Runtime Step 生成稳定、用户可读的名称。"""
+        if self._plan and self._plan.current_step:
+            step = self._plan.current_step
+            return f"计划步骤 {step.id}: {step.description}"
+        tool_names = ", ".join(tool_call.name for tool_call in tool_calls)
+        return f"执行工具: {tool_names}"
 
     def _advance_plan(
         self,

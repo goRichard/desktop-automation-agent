@@ -133,6 +133,7 @@ cli/            当前开发用 REPL
 config/         配置加载
 llm/            模型客户端
 memory/         SQLite/SQLModel 持久化
+runtime/        Run/Step 状态、事件总线和桌面互斥锁
 scheduler/      APScheduler 调度器
 skills/         Skill 解析和注册
 tools/          Agent 工具和 WinPeekaboo Adapter
