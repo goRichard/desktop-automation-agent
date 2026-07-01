@@ -26,6 +26,8 @@ from .models import (
     ScheduledJob,
     SchemaMigration,
     Session,
+    SkillRecord,
+    SkillVersionRecord,
 )
 
 # ──────────────────────────────────────────────────────
@@ -55,7 +57,7 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def _record_schema_version() -> None:
@@ -450,5 +452,143 @@ def list_runtime_events(
             .where(RuntimeEventRecord.run_id == run_id)
             .where(RuntimeEventRecord.sequence > after_sequence)
             .order_by(RuntimeEventRecord.sequence.asc())
+        )
+        return list(db.exec(statement).all())
+
+
+# ──────────────────────────────────────────────────────
+# Versioned Skills CRUD
+# ──────────────────────────────────────────────────────
+
+def create_skill_version(
+    *,
+    skill_id: str,
+    name: str,
+    description: str,
+    version: str,
+    status: str,
+    document: dict[str, Any],
+    source_format: str = "yaml",
+) -> SkillVersionRecord:
+    with DBSession(get_engine()) as db:
+        duplicate = db.exec(
+            select(SkillVersionRecord)
+            .where(SkillVersionRecord.skill_id == skill_id)
+            .where(SkillVersionRecord.version == version)
+        ).first()
+        if duplicate:
+            raise ValueError(f"Skill version already exists: {skill_id}@{version}")
+
+        now = datetime.utcnow()
+        skill = db.get(SkillRecord, skill_id)
+        if skill is None:
+            skill = SkillRecord(
+                id=skill_id,
+                name=name,
+                description=description,
+                latest_version=version,
+            )
+        else:
+            skill.name = name
+            skill.description = description
+            skill.latest_version = version
+            skill.updated_at = now
+        record = SkillVersionRecord(
+            skill_id=skill_id,
+            version=version,
+            status=status,
+            document=json.dumps(document, ensure_ascii=False),
+            source_format=source_format,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(skill)
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def update_skill_version(
+    skill_id: str,
+    version: str,
+    *,
+    status: Optional[str] = None,
+    document: Optional[dict[str, Any]] = None,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    validated: bool = False,
+    published: bool = False,
+    deprecated: bool = False,
+) -> Optional[SkillVersionRecord]:
+    with DBSession(get_engine()) as db:
+        record = db.exec(
+            select(SkillVersionRecord)
+            .where(SkillVersionRecord.skill_id == skill_id)
+            .where(SkillVersionRecord.version == version)
+        ).first()
+        if record is None:
+            return None
+        now = datetime.utcnow()
+        if status is not None:
+            record.status = status
+        if document is not None:
+            record.document = json.dumps(document, ensure_ascii=False)
+        if name is not None or description is not None:
+            skill = db.get(SkillRecord, skill_id)
+            if skill:
+                if name is not None:
+                    skill.name = name
+                if description is not None:
+                    skill.description = description
+                skill.updated_at = now
+                db.add(skill)
+        if validated:
+            record.validated_at = now
+        if published:
+            record.published_at = now
+            skill = db.get(SkillRecord, skill_id)
+            if skill:
+                skill.published_version = version
+                skill.updated_at = now
+                db.add(skill)
+        if deprecated:
+            skill = db.get(SkillRecord, skill_id)
+            if skill and skill.published_version == version:
+                skill.published_version = None
+                skill.updated_at = now
+                db.add(skill)
+        record.updated_at = now
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def get_skill_record(skill_id: str) -> Optional[SkillRecord]:
+    with DBSession(get_engine()) as db:
+        return db.get(SkillRecord, skill_id)
+
+
+def list_skill_records() -> list[SkillRecord]:
+    with DBSession(get_engine()) as db:
+        return list(db.exec(select(SkillRecord).order_by(SkillRecord.name.asc())).all())
+
+
+def get_skill_version(skill_id: str, version: str) -> Optional[SkillVersionRecord]:
+    with DBSession(get_engine()) as db:
+        return db.exec(
+            select(SkillVersionRecord)
+            .where(SkillVersionRecord.skill_id == skill_id)
+            .where(SkillVersionRecord.version == version)
+        ).first()
+
+
+def list_skill_versions(skill_id: str) -> list[SkillVersionRecord]:
+    with DBSession(get_engine()) as db:
+        statement = (
+            select(SkillVersionRecord)
+            .where(SkillVersionRecord.skill_id == skill_id)
+            .order_by(SkillVersionRecord.created_at.desc())
         )
         return list(db.exec(statement).all())

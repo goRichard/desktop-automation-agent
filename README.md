@@ -11,7 +11,7 @@
 - 视觉定位：UIA 确定性匹配优先，LLM 语义选择其次，视觉模型兜底。
 - 浏览器：通过 Playwright 控制系统 Microsoft Edge。
 - Agent Loop：支持 OpenAI-compatible 和 Azure OpenAI 的工具调用循环。
-- Skill：加载 Markdown + YAML front matter 定义的流程，并支持触发词和语义匹配。
+- Skill：支持版本化 YAML Schema、Markdown 兼容导入、生命周期管理和确定性步骤执行。
 - 调度：通过 APScheduler 和 SQLite 持久化 Cron Task。
 - 历史：通过 SQLModel/SQLite 保存会话、消息、任务和执行日志。
 
@@ -110,7 +110,20 @@ POST /runs/{id}/pause
 POST /runs/{id}/resume
 POST /runs/{id}/cancel
 WS   /events
+POST /skills
+GET  /skills
+GET  /skills/{id}
+GET  /skills/{id}/versions/{version}
+PUT  /skills/{id}/versions/{version}
+POST /skills/{id}/versions/{version}/validate
+POST /skills/{id}/versions/{version}/publish
+POST /skills/{id}/versions/{version}/deprecate
 ```
+
+Skill 生命周期为 `draft → validated → published → deprecated`。只有 draft 可原地编辑；
+已发布内容必须通过新版本更新。确定性步骤通过工具注册表执行，Windows 桌面原子操作仍由
+WinPeekaboo 提供。PowerShell Skill 只能引用已审核、固定版本且不含删除能力的脚本 ID，
+当前执行接口在脚本注册表接入前默认拒绝这类步骤。
 
 常用命令：
 

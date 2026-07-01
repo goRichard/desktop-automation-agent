@@ -32,7 +32,7 @@ def load_skills(skills_dir: Optional[Path] = None) -> int:
 
     count = 0
     # 同时搜索 *.skill.md 和 SKILL.md（大小写不敏感）
-    patterns = ["*.skill.md", "*.md", "SKILL.md"]
+    patterns = ["*.skill.md", "*.md", "SKILL.md", "*.yaml", "*.yml"]
     found_files: set[Path] = set()
 
     for pattern in patterns:

@@ -197,6 +197,33 @@ class RuntimeEventRecord(SQLModel, table=True):
     timestamp: str
 
 
+class SkillRecord(SQLModel, table=True):
+    __tablename__ = "skills"
+
+    id: str = Field(primary_key=True)
+    name: str = Field(index=True)
+    description: str = ""
+    latest_version: str
+    published_version: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SkillVersionRecord(SQLModel, table=True):
+    __tablename__ = "skill_versions"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    skill_id: str = Field(foreign_key="skills.id", index=True)
+    version: str = Field(index=True)
+    status: str = Field(index=True)
+    document: str = Field(description="JSON encoded Skill document")
+    source_format: str = "yaml"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    validated_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+
+
 class SchemaMigration(SQLModel, table=True):
     __tablename__ = "schema_migrations"
 

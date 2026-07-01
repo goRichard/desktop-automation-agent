@@ -3,6 +3,8 @@ from __future__ import annotations
 import yaml
 from fastapi.testclient import TestClient
 
+from tests.test_skills import skill_value
+
 
 def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.yaml"
@@ -46,6 +48,7 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         capabilities = client.get("/runtime/capabilities", headers=headers)
         assert capabilities.status_code == 200
         assert capabilities.json()["desktop"]["provider"] == "winpeekaboo"
+        assert "publish" in capabilities.json()["skills"]
 
         environment = client.get("/runtime/environment", headers=headers)
         assert environment.status_code == 200
@@ -58,3 +61,23 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
             json={"user_input": "demo", "session_id": "missing"},
         )
         assert missing_session.status_code == 404
+
+        created = client.post("/skills", headers=headers, json=skill_value())
+        assert created.status_code == 201
+        assert created.json()["status"] == "draft"
+
+        validated = client.post(
+            "/skills/send-outlook-mail/versions/1.0.0/validate",
+            headers=headers,
+        )
+        assert validated.status_code == 200
+        published = client.post(
+            "/skills/send-outlook-mail/versions/1.0.0/publish",
+            headers=headers,
+        )
+        assert published.status_code == 200
+        assert published.json()["status"] == "published"
+
+        skill = client.get("/skills/send-outlook-mail", headers=headers)
+        assert skill.status_code == 200
+        assert skill.json()["publishedVersion"] == "1.0.0"

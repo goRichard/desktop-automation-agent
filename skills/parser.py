@@ -9,6 +9,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from pydantic import ValidationError
+
+from .schema import (
+    SkillDocument,
+    SkillExecution,
+    SkillMetadata,
+    SkillStatus,
+    SkillStep,
+    normalize_skill_id,
+)
+
 
 @dataclass
 class SkillDefinition:
@@ -19,6 +30,7 @@ class SkillDefinition:
     triggers: list[str] = field(default_factory=list)  # 触发关键词列表
     content: str = ""                                   # 完整 Markdown 正文
     file_path: Optional[Path] = None
+    document: Optional[SkillDocument] = None
 
     def to_summary(self) -> str:
         """生成注入 System Prompt 的摘要文本"""
@@ -50,6 +62,13 @@ def parse_skill_file(path: Path) -> Optional[SkillDefinition]:
         raw = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return None
+
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            document = SkillDocument.from_yaml(raw)
+        except (ValueError, ValidationError):
+            return None
+        return _from_document(document, path)
 
     name = None
     description = ""
@@ -113,6 +132,26 @@ def parse_skill_file(path: Path) -> Optional[SkillDefinition]:
                 description = line[:100]
                 break
 
+    document = SkillDocument(
+        metadata=SkillMetadata(
+            id=normalize_skill_id(name),
+            name=name,
+            description=description,
+            version=_normalize_version(version),
+            status=SkillStatus.DRAFT,
+            triggers=triggers,
+        ),
+        execution=SkillExecution(
+            steps=[
+                SkillStep(
+                    id="legacy-agent-step",
+                    name=name,
+                    action="agent",
+                    instruction=content,
+                )
+            ]
+        ),
+    )
     return SkillDefinition(
         name=name,
         description=description,
@@ -120,4 +159,25 @@ def parse_skill_file(path: Path) -> Optional[SkillDefinition]:
         triggers=triggers,
         content=content,
         file_path=path,
+        document=document,
     )
+
+
+def _from_document(document: SkillDocument, path: Path) -> SkillDefinition:
+    metadata = document.metadata
+    return SkillDefinition(
+        name=metadata.name,
+        description=metadata.description,
+        version=metadata.version,
+        triggers=metadata.triggers,
+        content=document.to_yaml(),
+        file_path=path,
+        document=document,
+    )
+
+
+def _normalize_version(version: str) -> str:
+    parts = version.strip().split(".")
+    if all(part.isdigit() for part in parts) and 1 <= len(parts) <= 3:
+        return ".".join(parts + ["0"] * (3 - len(parts)))
+    return "1.0.0"

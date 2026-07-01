@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from memory import init_db
 from scheduler import shutdown_scheduler, start_scheduler
-from skills import load_skills
+from skills import list_skills, load_skills
+from skills.repository import SkillConflictError, SkillNotFoundError, SkillRepository
+from skills.schema import SkillDocument
 
 from .lock import desktop_execution_lock
 from .manager import RuntimeManager
@@ -33,12 +35,14 @@ class CancelRunRequest(BaseModel):
 def create_app(token: Optional[str] = None) -> FastAPI:
     runtime_token = token or os.environ.get("FLOWPILOT_RUNTIME_TOKEN") or secrets.token_urlsafe(32)
     manager = RuntimeManager()
+    skill_repository = SkillRepository()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         settings = get_settings()
         init_db(settings.memory_db)
         load_skills(settings.skills_dir)
+        skill_repository.import_definitions(list_skills())
         import tools  # noqa: F401
         from tools import scheduler_tool  # noqa: F401
 
@@ -56,6 +60,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
     )
     app.state.runtime_token = runtime_token
     app.state.runtime_manager = manager
+    app.state.skill_repository = skill_repository
 
     async def require_token(
         x_runtime_token: Optional[str] = Header(default=None),
@@ -76,6 +81,7 @@ def create_app(token: Optional[str] = None) -> FastAPI:
         return {
             "runs": ["start", "pause", "resume", "cancel", "history"],
             "events": ["history", "websocket"],
+            "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
             "desktop": {"provider": "winpeekaboo", "maxConcurrentRuns": 1},
             "browser": {"provider": "playwright", "channel": "msedge"},
         }
@@ -90,6 +96,57 @@ def create_app(token: Optional[str] = None) -> FastAPI:
             "browser": settings.browser,
             "desktopLockOwner": desktop_execution_lock.owner_run_id,
         }
+
+    @app.get("/skills", dependencies=[Depends(require_token)])
+    async def list_versioned_skills() -> list[dict]:
+        return skill_repository.list()
+
+    @app.post(
+        "/skills",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_token)],
+    )
+    async def create_skill(document: SkillDocument) -> dict:
+        return _skill_operation(skill_repository.create, document)
+
+    @app.get("/skills/{skill_id}", dependencies=[Depends(require_token)])
+    async def get_versioned_skill(skill_id: str) -> dict:
+        return _skill_operation(skill_repository.get, skill_id)
+
+    @app.get(
+        "/skills/{skill_id}/versions/{version}",
+        dependencies=[Depends(require_token)],
+    )
+    async def get_skill_version(skill_id: str, version: str) -> dict:
+        return _skill_operation(skill_repository.get_version, skill_id, version)
+
+    @app.put(
+        "/skills/{skill_id}/versions/{version}",
+        dependencies=[Depends(require_token)],
+    )
+    async def update_skill(skill_id: str, version: str, document: SkillDocument) -> dict:
+        return _skill_operation(skill_repository.update_draft, skill_id, version, document)
+
+    @app.post(
+        "/skills/{skill_id}/versions/{version}/validate",
+        dependencies=[Depends(require_token)],
+    )
+    async def validate_skill(skill_id: str, version: str) -> dict:
+        return _skill_operation(skill_repository.validate, skill_id, version)
+
+    @app.post(
+        "/skills/{skill_id}/versions/{version}/publish",
+        dependencies=[Depends(require_token)],
+    )
+    async def publish_skill(skill_id: str, version: str) -> dict:
+        return _skill_operation(skill_repository.publish, skill_id, version)
+
+    @app.post(
+        "/skills/{skill_id}/versions/{version}/deprecate",
+        dependencies=[Depends(require_token)],
+    )
+    async def deprecate_skill(skill_id: str, version: str) -> dict:
+        return _skill_operation(skill_repository.deprecate, skill_id, version)
 
     @app.post(
         "/runs",
@@ -207,6 +264,15 @@ def _event_queue(manager: RuntimeManager, run_id: Optional[str]):
         queue.put_nowait(event)
 
     return queue, manager.events.subscribe(receive)
+
+
+def _skill_operation(handler, *args) -> dict:
+    try:
+        return handler(*args)
+    except SkillNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SkillConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 def main() -> None:

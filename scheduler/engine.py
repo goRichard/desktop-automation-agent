@@ -168,3 +168,4 @@ def shutdown_scheduler() -> None:
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
         logger.info("APScheduler 已关闭")
+    _scheduler = None
