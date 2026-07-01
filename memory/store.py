@@ -21,6 +21,7 @@ from .models import (
     Message,
     MessageRole,
     RuntimeEventRecord,
+    RuntimeEvidenceRecord,
     RuntimeRun,
     RuntimeRunContext,
     RuntimeStepRun,
@@ -58,7 +59,7 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 def _record_schema_version() -> None:
@@ -475,6 +476,33 @@ def list_runtime_events(
             .where(RuntimeEventRecord.run_id == run_id)
             .where(RuntimeEventRecord.sequence > after_sequence)
             .order_by(RuntimeEventRecord.sequence.asc())
+        )
+        return list(db.exec(statement).all())
+
+
+def save_runtime_evidence(value: dict[str, Any]) -> RuntimeEvidenceRecord:
+    record = RuntimeEvidenceRecord(
+        id=value["id"],
+        run_id=value["run_id"],
+        step_id=value["step_id"],
+        kind=value.get("kind", "failure"),
+        path=value["path"],
+        metadata_json=json.dumps(value.get("metadata", {}), ensure_ascii=False, default=str),
+        created_at=value["created_at"],
+    )
+    with DBSession(get_engine()) as db:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def list_runtime_evidence(run_id: str) -> list[RuntimeEvidenceRecord]:
+    with DBSession(get_engine()) as db:
+        statement = (
+            select(RuntimeEvidenceRecord)
+            .where(RuntimeEvidenceRecord.run_id == run_id)
+            .order_by(RuntimeEvidenceRecord.created_at.asc())
         )
         return list(db.exec(statement).all())
 

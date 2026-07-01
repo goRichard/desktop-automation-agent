@@ -142,6 +142,7 @@ def create_app(
                 "confirm",
                 "cancel",
                 "history",
+                "evidence",
             ],
             "events": ["history", "websocket"],
             "skills": ["create", "edit_draft", "validate", "publish", "deprecate"],
@@ -374,12 +375,27 @@ def create_app(
                         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                         detail=str(error),
                     ) from error
+
+                async def resolve_nested_skill(
+                    nested_id: str,
+                    nested_version: str,
+                    nested_mode: ExecutionMode,
+                ) -> SkillDocument:
+                    nested, _ = _resolve_skill_run(
+                        skill_repository,
+                        nested_id,
+                        nested_version,
+                        nested_mode,
+                    )
+                    return nested
+
                 return await manager.start_skill_run(
                     document,
                     payload.inputs,
                     mode,
                     session_id=payload.session_id,
                     unattended_approved=payload.external_side_effects_approved,
+                    skill_resolver=resolve_nested_skill,
                 )
             return await manager.start_run(
                 user_input=payload.user_input or "",
@@ -410,6 +426,15 @@ def create_app(
         if await manager.get_run(run_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         return await manager.list_events(run_id, after)
+
+    @app.get("/runs/{run_id}/evidence", dependencies=[Depends(require_token)])
+    async def get_run_evidence(run_id: str) -> list[dict]:
+        try:
+            return await manager.list_evidence(run_id)
+        except LookupError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
+            ) from error
 
     @app.post("/runs/{run_id}/pause", dependencies=[Depends(require_token)])
     async def pause_run(run_id: str) -> dict:

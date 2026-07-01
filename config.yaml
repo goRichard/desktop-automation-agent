@@ -85,6 +85,7 @@ agent:
   max_iterations: 100
   skills_dir: ./skills/user_skills
   memory_db: ./data/agent.db
+  evidence_dir: ./data/run_evidence
   system_prompt: |
     你是一个强大的 Windows 桌面自动化 Agent，类似 Claude Code。
     你可以通过工具控制桌面、识别屏幕内容、执行自动化任务。

@@ -182,6 +182,12 @@ class Settings(BaseSettings):
         return self._resolve_data_path(self.agent.get("memory_db", "./data/agent.db"))
 
     @property
+    def evidence_dir(self) -> Path:
+        return self._resolve_data_path(
+            self.agent.get("evidence_dir", "./data/run_evidence")
+        )
+
+    @property
     def browser(self) -> dict[str, Any]:
         return dict(self._raw.get("browser", {"channel": "msedge"}))
 

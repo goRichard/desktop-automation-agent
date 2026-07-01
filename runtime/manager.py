@@ -88,10 +88,13 @@ class RuntimeManager:
         *,
         session_id: Optional[str] = None,
         unattended_approved: bool = False,
+        skill_resolver: Optional[Any] = None,
     ) -> dict[str, Any]:
         async with self._lifecycle_lock:
             from memory import create_session, get_session
+            from config import get_settings
             from skills.executor import ACTION_TO_TOOL, SkillExecutor
+            from .evidence import RuntimeEvidenceCollector
 
             if session_id:
                 if await asyncio.to_thread(get_session, session_id) is None:
@@ -115,6 +118,7 @@ class RuntimeManager:
                 inputs=inputs,
             )
             agent_loop_holder: dict[str, Any] = {}
+            evidence_collector = RuntimeEvidenceCollector(get_settings().evidence_dir)
 
             async def run_agent_step(instruction: str, allowed_tools: list[str]) -> str:
                 from agent import AgentLoop
@@ -133,6 +137,10 @@ class RuntimeManager:
             executor = SkillExecutor(
                 agent_runner=run_agent_step,
                 confirmation_runner=controller.request_confirmation,
+                skill_resolver=skill_resolver,
+                evidence_runner=lambda step, error, details: evidence_collector.collect(
+                    controller, step, error, details
+                ),
             )
             task = asyncio.create_task(
                 self._consume_skill_run(
@@ -281,6 +289,20 @@ class RuntimeManager:
             {
                 **record.model_dump(exclude={"data"}),
                 "data": json.loads(record.data),
+            }
+            for record in records
+        ]
+
+    async def list_evidence(self, run_id: str) -> list[dict[str, Any]]:
+        from memory import list_runtime_evidence
+
+        if await self.get_run(run_id) is None:
+            raise LookupError(f"Run not found: {run_id}")
+        records = await asyncio.to_thread(list_runtime_evidence, run_id)
+        return [
+            {
+                **record.model_dump(exclude={"metadata_json"}),
+                "metadata": json.loads(record.metadata_json),
             }
             for record in records
         ]

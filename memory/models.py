@@ -208,6 +208,18 @@ class RuntimeEventRecord(SQLModel, table=True):
     timestamp: str
 
 
+class RuntimeEvidenceRecord(SQLModel, table=True):
+    __tablename__ = "runtime_evidence"
+
+    id: str = Field(primary_key=True)
+    run_id: str = Field(foreign_key="runtime_runs.id", index=True)
+    step_id: str = Field(index=True)
+    kind: str = Field(default="failure")
+    path: str
+    metadata_json: str = Field(default="{}")
+    created_at: str
+
+
 class SkillRecord(SQLModel, table=True):
     __tablename__ = "skills"
 

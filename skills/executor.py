@@ -17,6 +17,8 @@ from .schema import ExecutionMode, InputType, SkillDocument, SkillStep
 AgentRunner = Callable[[str, list[str]], Awaitable[Any]]
 ScriptRunner = Callable[[str, dict[str, Any]], Awaitable[Any]]
 ConfirmationRunner = Callable[[dict[str, Any]], Awaitable[bool]]
+SkillResolver = Callable[[str, str, ExecutionMode], Awaitable[SkillDocument]]
+FailureEvidenceRunner = Callable[[SkillStep, str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 ACTION_TO_TOOL = {
     "app.launch": "app_launch",
@@ -55,10 +57,14 @@ class SkillExecutor:
         agent_runner: Optional[AgentRunner] = None,
         script_runner: Optional[ScriptRunner] = None,
         confirmation_runner: Optional[ConfirmationRunner] = None,
+        skill_resolver: Optional[SkillResolver] = None,
+        evidence_runner: Optional[FailureEvidenceRunner] = None,
     ):
         self.agent_runner = agent_runner
         self.script_runner = script_runner
         self.confirmation_runner = confirmation_runner
+        self.skill_resolver = skill_resolver
+        self.evidence_runner = evidence_runner
 
     async def execute(
         self,
@@ -67,9 +73,18 @@ class SkillExecutor:
         controller: Optional[RunController] = None,
         mode: Optional[ExecutionMode] = None,
         unattended_approved: bool = False,
+        _acquire_desktop: bool = True,
+        _call_stack: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         values = self.validate_inputs(document, inputs)
         execution_mode = ExecutionMode(mode or document.execution.default_mode)
+        skill_key = f"{document.metadata.id}@{document.metadata.version}"
+        if skill_key in _call_stack:
+            chain = " -> ".join((*_call_stack, skill_key))
+            raise SkillExecutionError(f"Recursive Skill call detected: {chain}")
+        if len(_call_stack) >= 8:
+            raise SkillExecutionError("Nested Skill call depth exceeds 8")
+        call_stack = (*_call_stack, skill_key)
         context: dict[str, Any] = {
             "input": values,
             "steps": {},
@@ -77,7 +92,7 @@ class SkillExecutor:
         }
         results: list[dict[str, Any]] = []
 
-        async with self._desktop_lock(controller):
+        async with self._desktop_lock(controller, _acquire_desktop):
             for step in document.execution.steps:
                 if controller:
                     await controller.checkpoint()
@@ -93,7 +108,14 @@ class SkillExecutor:
                     await self._confirm_before_step(
                         step, context, execution_mode, unattended_approved
                     )
-                    result = await self._execute_step(step, context, controller)
+                    result = await self._execute_step(
+                        step,
+                        context,
+                        controller,
+                        execution_mode,
+                        unattended_approved,
+                        call_stack,
+                    )
                 results.append(result)
                 context["steps"][step.id] = result
                 if not result["success"] and step.on_failure == "stop":
@@ -193,8 +215,12 @@ class SkillExecutor:
         step: SkillStep,
         context: dict[str, Any],
         controller: Optional[RunController],
+        mode: ExecutionMode,
+        unattended_approved: bool,
+        call_stack: tuple[str, ...],
     ) -> dict[str, Any]:
-        tool_name = "agent" if step.action == "agent" else ACTION_TO_TOOL.get(step.action)
+        special_actions = {"agent", "condition", "skill.call", "powershell.runApproved"}
+        tool_name = step.action if step.action in special_actions else ACTION_TO_TOOL.get(step.action)
         if tool_name is None:
             raise SkillExecutionError(f"Unsupported Skill action: {step.action}")
 
@@ -205,7 +231,15 @@ class SkillExecutor:
         last_error: Optional[str] = None
         for attempt in range(1, step.retry.max_attempts + 1):
             try:
-                output = await self._invoke(step, context, tool_name)
+                output = await self._invoke(
+                    step,
+                    context,
+                    tool_name,
+                    controller,
+                    mode,
+                    unattended_approved,
+                    call_stack,
+                )
                 await self._verify(step, output)
                 result = {
                     "id": step.id,
@@ -270,16 +304,64 @@ class SkillExecutor:
             "success": False,
             "error": last_error,
         }
+        if self.evidence_runner and last_error:
+            try:
+                result["evidence"] = await self.evidence_runner(
+                    step,
+                    last_error,
+                    {"action": step.action, "target": step.target},
+                )
+            except Exception as evidence_error:
+                result["evidenceError"] = str(evidence_error)
         if controller and runtime_step:
             await controller.finish_step(runtime_step, success=False, error=last_error)
         return result
 
-    async def _invoke(self, step: SkillStep, context: dict[str, Any], tool_name: str) -> Any:
+    async def _invoke(
+        self,
+        step: SkillStep,
+        context: dict[str, Any],
+        tool_name: str,
+        controller: Optional[RunController],
+        mode: ExecutionMode,
+        unattended_approved: bool,
+        call_stack: tuple[str, ...],
+    ) -> Any:
         if step.action == "agent":
             if self.agent_runner is None:
                 raise SkillExecutionError("Agent step requires an injected agent runner")
             instruction = self._resolve(step.instruction or "", context)
             return await self.agent_runner(str(instruction), step.allowed_tools)
+
+        if step.action == "condition":
+            parameters = self._resolve(step.parameters, context)
+            return self._evaluate_condition(parameters)
+
+        if step.action == "skill.call":
+            if self.skill_resolver is None:
+                raise SkillExecutionError("Nested Skill step requires a Skill resolver")
+            parameters = self._resolve(step.parameters, context)
+            skill_id = parameters.get("skillId") or parameters.get("skill_id")
+            version = parameters.get("version")
+            child_inputs = parameters.get("inputs", {})
+            if not skill_id or not version:
+                raise SkillExecutionError("skill.call requires skillId and fixed version")
+            if not isinstance(child_inputs, dict):
+                raise SkillExecutionError("skill.call inputs must be an object")
+            child = await self.skill_resolver(str(skill_id), str(version), mode)
+            if child.metadata.id != str(skill_id) or child.metadata.version != str(version):
+                raise SkillExecutionError(
+                    "Skill resolver returned a different id or version than requested"
+                )
+            return await self.execute(
+                child,
+                child_inputs,
+                controller=controller,
+                mode=mode,
+                unattended_approved=unattended_approved,
+                _acquire_desktop=False,
+                _call_stack=call_stack,
+            )
 
         if step.action == "powershell.runApproved":
             if self.script_runner is None:
@@ -300,6 +382,34 @@ class SkillExecutor:
         if inspect.iscoroutinefunction(tool):
             return await tool(**parameters)
         return await asyncio.to_thread(tool, **parameters)
+
+    @staticmethod
+    def _evaluate_condition(parameters: dict[str, Any]) -> bool:
+        operator = parameters.get("operator", "truthy")
+        left = parameters.get("left")
+        right = parameters.get("right")
+        operations = {
+            "equals": lambda: left == right,
+            "not_equals": lambda: left != right,
+            "contains": lambda: right in left,
+            "not_contains": lambda: right not in left,
+            "truthy": lambda: bool(left),
+            "falsy": lambda: not bool(left),
+            "greater_than": lambda: left > right,
+            "less_than": lambda: left < right,
+        }
+        operation = operations.get(str(operator))
+        if operation is None:
+            raise SkillExecutionError(f"Unsupported condition operator: {operator}")
+        try:
+            matched = bool(operation())
+        except (TypeError, ValueError) as error:
+            raise SkillExecutionError(f"Condition evaluation failed: {error}") from error
+        if not matched:
+            raise SkillExecutionError(
+                f"Condition was false: {left!r} {operator} {right!r}"
+            )
+        return True
 
     @staticmethod
     def _normalize_parameters(action: str, value: dict[str, Any]) -> dict[str, Any]:
@@ -369,7 +479,7 @@ class SkillExecutor:
             else:
                 continue
             expected = python_types[definition.type]
-            if definition.type == InputType.INTEGER and isinstance(value, bool):
+            if definition.type in {InputType.INTEGER, InputType.NUMBER} and isinstance(value, bool):
                 valid = False
             else:
                 valid = isinstance(value, expected)
@@ -377,7 +487,15 @@ class SkillExecutor:
                 raise SkillExecutionError(f"Invalid type for Skill input {name}: {definition.type.value}")
             if definition.type == InputType.ARRAY and definition.items:
                 item_type = python_types[definition.items]
-                if any(not isinstance(item, item_type) for item in value):
+                invalid_boolean_number = definition.items in {
+                    InputType.INTEGER,
+                    InputType.NUMBER,
+                }
+                if any(
+                    not isinstance(item, item_type)
+                    or (invalid_boolean_number and isinstance(item, bool))
+                    for item in value
+                ):
                     raise SkillExecutionError(
                         f"Invalid array item type for Skill input {name}: {definition.items.value}"
                     )
@@ -414,8 +532,8 @@ class SkillExecutor:
 
     @staticmethod
     @asynccontextmanager
-    async def _desktop_lock(controller: Optional[RunController]):
-        if controller is None:
+    async def _desktop_lock(controller: Optional[RunController], acquire: bool = True):
+        if controller is None or not acquire:
             yield
             return
         async with desktop_execution_lock.hold(controller):

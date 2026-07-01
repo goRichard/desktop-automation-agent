@@ -586,6 +586,7 @@ POST   /tasks/{id}/run
 
 POST   /runs
 GET    /runs/{id}
+GET    /runs/{id}/evidence
 POST   /runs/{id}/pause
 POST   /runs/{id}/resume
 POST   /runs/{id}/cancel

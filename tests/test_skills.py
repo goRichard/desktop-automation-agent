@@ -236,3 +236,73 @@ async def test_skill_executor_step_mode_and_unattended_policy(monkeypatch) -> No
         unattended_approved=True,
     )
     assert unattended["steps"][0]["output"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_condition_and_fixed_nested_skill_call(monkeypatch) -> None:
+    monkeypatch.setattr("skills.executor.get_tool", lambda _: lambda **__: "ok")
+    child_value = skill_value("2.0.0")
+    child_value["metadata"]["id"] = "child-skill"
+    child_value["execution"]["steps"] = [
+        {"id": "wait", "name": "Wait", "action": "ui.wait", "with": {"seconds": 0}}
+    ]
+    child = SkillDocument.model_validate(child_value)
+
+    parent_value = skill_value()
+    parent_value["execution"]["steps"] = [
+        {
+            "id": "guard",
+            "name": "Check recipient",
+            "action": "condition",
+            "with": {
+                "left": "{{ input.recipient }}",
+                "operator": "contains",
+                "right": "@",
+            },
+        },
+        {
+            "id": "child",
+            "name": "Call child",
+            "action": "skill.call",
+            "with": {
+                "skillId": "child-skill",
+                "version": "2.0.0",
+                "inputs": {"recipient": "{{ input.recipient }}"},
+            },
+        },
+    ]
+    parent = SkillDocument.model_validate(parent_value)
+    resolved = []
+
+    async def resolver(skill_id, version, mode):
+        resolved.append((skill_id, version, mode.value))
+        return child
+
+    result = await SkillExecutor(skill_resolver=resolver).execute(
+        parent,
+        {"recipient": "person@example.com"},
+    )
+    assert result["success"] is True
+    assert result["steps"][1]["output"]["skillId"] == "child-skill"
+    assert resolved == [("child-skill", "2.0.0", "guided")]
+
+    async def recursive_resolver(*_):
+        return parent
+
+    recursive = parent.model_copy(deep=True)
+    recursive.execution.steps = [
+        recursive.execution.steps[1].model_copy(
+            update={
+                "parameters": {
+                    "skillId": parent.metadata.id,
+                    "version": "1.0.0",
+                    "inputs": {"recipient": "person@example.com"},
+                }
+            }
+        )
+    ]
+    with pytest.raises(SkillExecutionError, match="Recursive Skill call"):
+        await SkillExecutor(skill_resolver=recursive_resolver).execute(
+            recursive,
+            {"recipient": "person@example.com"},
+        )

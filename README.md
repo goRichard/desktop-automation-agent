@@ -126,6 +126,7 @@ POST /runs
 GET  /runs
 GET  /runs/{id}
 GET  /runs/{id}/events
+GET  /runs/{id}/evidence
 POST /runs/{id}/pause
 POST /runs/{id}/resume
 POST /runs/{id}/confirm
@@ -162,6 +163,10 @@ POST /certificates/import
 `waiting_user`，由 `/runs/{id}/confirm` 继续；`unattended` 只允许 published 固定版本，
 外部副作用还必须显式提供 `externalSideEffectsApproved: true`。Run 历史会保存 Skill ID、
 版本、模式和输入参数。
+
+`condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
+固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
+会在 `data/run_evidence` 保存错误元数据，并尽力采集截图和目标窗口 UIA 信息。
 
 Skill 生命周期为 `draft → validated → published → deprecated`。只有 draft 可原地编辑；
 已发布内容必须通过新版本更新。确定性步骤通过工具注册表执行，Windows 桌面原子操作仍由
