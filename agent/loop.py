@@ -23,6 +23,7 @@ from runtime import (
     RunController,
     RunStatus,
     desktop_execution_lock,
+    get_runtime_persistence,
 )
 from tools import get_all_schemas
 
@@ -130,14 +131,18 @@ class AgentLoop:
         confirmed_plan: Optional[str] = None,
         on_token: Optional[Any] = None,
         run_id: Optional[str] = None,
+        run_controller: Optional[RunController] = None,
     ) -> AsyncGenerator[str, None]:
         """创建受控 Run，串行占用桌面并转发执行输出。"""
-        controller = RunController(
+        controller = run_controller or RunController(
             session_id=self.session_id,
             user_input=user_input,
             event_bus=self.event_bus,
             run_id=run_id,
+            persistence=get_runtime_persistence(),
         )
+        if controller.state.session_id != self.session_id:
+            raise ValueError("RunController session does not match AgentLoop session")
         self.current_run = controller
         await controller.initialize()
 
@@ -159,6 +164,10 @@ class AgentLoop:
                     yield token
         except RunCancelled as error:
             message = f"执行已取消：{error}"
+            controller.state.output += message
+            await controller.emit("run.output", {"delta": message})
+            if controller.persistence:
+                await controller.persistence.save_run(controller.state)
             yield message
         except Exception as error:
             await controller.fail(f"{type(error).__name__}: {error}")
@@ -213,8 +222,13 @@ class AgentLoop:
                 response = await self.llm.chat(messages, tools=tools)
             except Exception as e:
                 if _is_context_overflow(e):
-                    await controller.fail(_context_overflow_msg())
-                    yield f"\n{_context_overflow_msg()}"
+                    overflow_message = _context_overflow_msg()
+                    controller.state.output += f"\n{overflow_message}"
+                    await controller.emit(
+                        "run.output", {"delta": f"\n{overflow_message}"}
+                    )
+                    await controller.fail(overflow_message)
+                    yield f"\n{overflow_message}"
                     save_message(self.session_id, role=MessageRole.assistant, content=_context_overflow_msg())
                     return
                 raise
@@ -321,8 +335,10 @@ class AgentLoop:
                             success=False,
                             error=plan_failure,
                         )
-                        await controller.fail(plan_failure)
                         message = f"计划执行已停止：{plan_failure}"
+                        controller.state.output += message
+                        await controller.emit("run.output", {"delta": message})
+                        await controller.fail(plan_failure)
                         save_message(
                             self.session_id,
                             role=MessageRole.assistant,
@@ -351,13 +367,20 @@ class AgentLoop:
                     async for token in self.llm.chat_stream(messages):
                         await controller.checkpoint()
                         full_response += token
+                        controller.state.output += token
+                        await controller.emit("run.output", {"delta": token})
                         if on_token:
                             await _maybe_await(on_token(token))
                         yield token
                 except Exception as e:
                     if _is_context_overflow(e):
-                        await controller.fail(_context_overflow_msg())
-                        yield f"\n{_context_overflow_msg()}"
+                        overflow_message = _context_overflow_msg()
+                        controller.state.output += f"\n{overflow_message}"
+                        await controller.emit(
+                            "run.output", {"delta": f"\n{overflow_message}"}
+                        )
+                        await controller.fail(overflow_message)
+                        yield f"\n{overflow_message}"
                         save_message(
                             self.session_id,
                             role=MessageRole.assistant,
@@ -375,6 +398,8 @@ class AgentLoop:
                 return
 
         message = f"已达到最大迭代次数 {self.settings.max_iterations}"
+        controller.state.output += f"\n[{message}]"
+        await controller.emit("run.output", {"delta": f"\n[{message}]"})
         await controller.fail(message)
         yield f"\n[{message}]"
 

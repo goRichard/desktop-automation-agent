@@ -20,7 +20,11 @@ from .models import (
     MemoryCategory,
     Message,
     MessageRole,
+    RuntimeEventRecord,
+    RuntimeRun,
+    RuntimeStepRun,
     ScheduledJob,
+    SchemaMigration,
     Session,
 )
 
@@ -42,12 +46,25 @@ def init_db(db_path: Path | str = "./data/agent.db") -> None:
         connect_args={"check_same_thread": False},
     )
     SQLModel.metadata.create_all(_engine)
+    _record_schema_version()
 
 
 def get_engine():
     if _engine is None:
         init_db()
     return _engine
+
+
+_SCHEMA_VERSION = 1
+
+
+def _record_schema_version() -> None:
+    """记录当前 create-all Schema 版本，为后续增量迁移提供基线。"""
+    with DBSession(_engine) as db:
+        current = db.get(SchemaMigration, _SCHEMA_VERSION)
+        if current is None:
+            db.add(SchemaMigration(version=_SCHEMA_VERSION))
+            db.commit()
 
 
 # ──────────────────────────────────────────────────────
@@ -335,3 +352,103 @@ def format_memories_for_prompt(memories: list[AgentMemory]) -> str:
     for m in memories:
         lines.append(f"- [{m.category.value}] {m.key}: {m.value}")
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────
+# Runtime Run / Step / Event CRUD
+# ──────────────────────────────────────────────────────
+
+def upsert_runtime_run(value: dict[str, Any]) -> RuntimeRun:
+    with DBSession(get_engine()) as db:
+        record = db.get(RuntimeRun, value["id"]) or RuntimeRun(
+            id=value["id"],
+            session_id=value["session_id"],
+            user_input=value["user_input"],
+            status=value["status"],
+            created_at=value["created_at"],
+        )
+        for field_name in (
+            "session_id", "user_input", "status", "created_at",
+            "started_at", "finished_at", "error", "output",
+        ):
+            setattr(record, field_name, value.get(field_name))
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def upsert_runtime_step(value: dict[str, Any]) -> RuntimeStepRun:
+    with DBSession(get_engine()) as db:
+        record = db.get(RuntimeStepRun, value["id"]) or RuntimeStepRun(
+            id=value["id"],
+            run_id=value["run_id"],
+            name=value["name"],
+            status=value["status"],
+        )
+        record.run_id = value["run_id"]
+        record.name = value["name"]
+        record.tool_names = json.dumps(value.get("tool_names", []), ensure_ascii=False)
+        record.status = value["status"]
+        record.started_at = value.get("started_at")
+        record.finished_at = value.get("finished_at")
+        record.result = value.get("result")
+        record.error = value.get("error")
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+
+def save_runtime_event(value: dict[str, Any]) -> RuntimeEventRecord:
+    record = RuntimeEventRecord(
+        id=value["id"],
+        run_id=value["run_id"],
+        sequence=value["sequence"],
+        type=value["type"],
+        data=json.dumps(value.get("data", {}), ensure_ascii=False, default=str),
+        timestamp=value["timestamp"],
+    )
+    with DBSession(get_engine()) as db:
+        existing = db.get(RuntimeEventRecord, record.id)
+        if existing is None:
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+            return record
+        return existing
+
+
+def get_runtime_run(run_id: str) -> Optional[RuntimeRun]:
+    with DBSession(get_engine()) as db:
+        return db.get(RuntimeRun, run_id)
+
+
+def list_runtime_runs(limit: int = 50) -> list[RuntimeRun]:
+    with DBSession(get_engine()) as db:
+        statement = select(RuntimeRun).order_by(RuntimeRun.created_at.desc()).limit(limit)
+        return list(db.exec(statement).all())
+
+
+def list_runtime_steps(run_id: str) -> list[RuntimeStepRun]:
+    with DBSession(get_engine()) as db:
+        statement = (
+            select(RuntimeStepRun)
+            .where(RuntimeStepRun.run_id == run_id)
+            .order_by(RuntimeStepRun.started_at.asc())
+        )
+        return list(db.exec(statement).all())
+
+
+def list_runtime_events(
+    run_id: str,
+    after_sequence: int = 0,
+) -> list[RuntimeEventRecord]:
+    with DBSession(get_engine()) as db:
+        statement = (
+            select(RuntimeEventRecord)
+            .where(RuntimeEventRecord.run_id == run_id)
+            .where(RuntimeEventRecord.sequence > after_sequence)
+            .order_by(RuntimeEventRecord.sequence.asc())
+        )
+        return list(db.exec(statement).all())

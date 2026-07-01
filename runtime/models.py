@@ -70,6 +70,7 @@ class RunState:
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error: Optional[str] = None
+    output: str = ""
     steps: list[StepRunState] = field(default_factory=list)
 
     @property

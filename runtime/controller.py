@@ -14,6 +14,7 @@ from .models import (
     TERMINAL_RUN_STATUSES,
     utc_now,
 )
+from .persistence import RuntimePersistence
 
 
 class RunCancelled(Exception):
@@ -45,16 +46,19 @@ class RunController:
         user_input: str,
         event_bus: Optional[EventBus] = None,
         run_id: Optional[str] = None,
+        persistence: Optional[RuntimePersistence] = None,
     ):
         self.state = RunState(session_id=session_id, user_input=user_input)
         if run_id:
             self.state.id = run_id
         self.events = event_bus or EventBus()
+        self.persistence = persistence
         self._sequence = 0
         self._resume_gate = asyncio.Event()
         self._resume_gate.set()
 
     async def initialize(self) -> None:
+        await self._persist_run()
         await self.emit("run.queued", {"run": self.state.to_dict()})
 
     async def transition(
@@ -78,6 +82,8 @@ class RunController:
         if status in TERMINAL_RUN_STATUSES:
             self.state.finished_at = utc_now()
             self.state.error = error
+
+        await self._persist_run()
 
         event_type = f"run.{status.value}"
         if status == RunStatus.RUNNING:
@@ -111,6 +117,7 @@ class RunController:
                 step.status = StepStatus.SKIPPED
                 step.finished_at = utc_now()
                 step.error = reason
+                await self._persist_step(step)
                 await self.emit("step.skipped", {"step": step.to_dict()})
         await self.transition(RunStatus.CANCELLED, error=reason)
 
@@ -138,6 +145,7 @@ class RunController:
         step.status = StepStatus.RUNNING
         step.started_at = utc_now()
         self.state.steps.append(step)
+        await self._persist_step(step)
         await self.emit("step.started", {"step": step.to_dict()})
         return step
 
@@ -155,6 +163,7 @@ class RunController:
         step.finished_at = utc_now()
         step.result = result
         step.error = error
+        await self._persist_step(step)
         event_type = "step.completed" if success else "step.failed"
         await self.emit(event_type, {"step": step.to_dict()})
 
@@ -166,5 +175,17 @@ class RunController:
             type=event_type,
             data=data,
         )
+        # Streaming text can produce thousands of tiny events. It is delivered
+        # live over EventBus while the accumulated output is persisted on Run.
+        if self.persistence and event_type != "run.output":
+            await self.persistence.save_event(event)
         await self.events.publish(event)
         return event
+
+    async def _persist_run(self) -> None:
+        if self.persistence:
+            await self.persistence.save_run(self.state)
+
+    async def _persist_step(self, step: StepRunState) -> None:
+        if self.persistence:
+            await self.persistence.save_step(step)

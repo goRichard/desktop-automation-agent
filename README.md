@@ -89,6 +89,29 @@ python main.py
 desktop-agent
 ```
 
+启动供 Electron 使用的本地 Runtime API：
+
+```powershell
+$env:FLOWPILOT_RUNTIME_TOKEN = "replace-with-a-random-token"
+flowpilot-runtime
+```
+
+Runtime 仅监听 `127.0.0.1:8765`。除 `/health` 外，HTTP 请求需要通过
+`X-Runtime-Token` 或 Bearer Token 鉴权；WebSocket 事件地址为 `/events`。
+
+核心接口：
+
+```text
+POST /runs
+GET  /runs
+GET  /runs/{id}
+GET  /runs/{id}/events
+POST /runs/{id}/pause
+POST /runs/{id}/resume
+POST /runs/{id}/cancel
+WS   /events
+```
+
 常用命令：
 
 | 命令 | 作用 |

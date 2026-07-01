@@ -1,6 +1,6 @@
 """
 数据库模型定义（SQLModel）
-5 张业务表：sessions, messages, scheduled_jobs, job_execution_logs, agent_memory
+业务表：会话、消息、任务、记忆，以及 Runtime Run/Step/Event 记录
 """
 from datetime import datetime
 from enum import Enum
@@ -152,3 +152,53 @@ class AgentMemory(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     expires_at: Optional[datetime] = Field(default=None, description="可选过期时间")
+
+
+# ══════════════════════════════════════════════════════
+# Runtime 持久化
+# ══════════════════════════════════════════════════════
+
+class RuntimeRun(SQLModel, table=True):
+    __tablename__ = "runtime_runs"
+
+    id: str = Field(primary_key=True)
+    session_id: str = Field(index=True)
+    user_input: str
+    status: str = Field(index=True)
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+    output: str = ""
+
+
+class RuntimeStepRun(SQLModel, table=True):
+    __tablename__ = "runtime_step_runs"
+
+    id: str = Field(primary_key=True)
+    run_id: str = Field(foreign_key="runtime_runs.id", index=True)
+    name: str
+    tool_names: str = Field(default="[]", description="JSON encoded tool names")
+    status: str = Field(index=True)
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    result: Optional[str] = None
+    error: Optional[str] = None
+
+
+class RuntimeEventRecord(SQLModel, table=True):
+    __tablename__ = "runtime_events"
+
+    id: str = Field(primary_key=True)
+    run_id: str = Field(foreign_key="runtime_runs.id", index=True)
+    sequence: int = Field(index=True)
+    type: str = Field(index=True)
+    data: str = Field(default="{}", description="JSON encoded event payload")
+    timestamp: str
+
+
+class SchemaMigration(SQLModel, table=True):
+    __tablename__ = "schema_migrations"
+
+    version: int = Field(primary_key=True)
+    applied_at: datetime = Field(default_factory=datetime.utcnow)

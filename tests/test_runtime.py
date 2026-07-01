@@ -97,3 +97,41 @@ def test_cancel_marks_active_step_and_breaks_checkpoint() -> None:
             raise AssertionError("cancelled checkpoint did not raise")
 
     asyncio.run(check())
+
+
+def test_runtime_persistence_hooks() -> None:
+    class FakePersistence:
+        def __init__(self):
+            self.runs = []
+            self.steps = []
+            self.events = []
+
+        async def save_run(self, state) -> None:
+            self.runs.append(state.to_dict())
+
+        async def save_step(self, step) -> None:
+            self.steps.append(step.to_dict())
+
+        async def save_event(self, event) -> None:
+            self.events.append(event.to_dict())
+
+    async def check() -> None:
+        persistence = FakePersistence()
+        run = RunController(
+            "session",
+            "demo",
+            run_id="run-persistence",
+            persistence=persistence,
+        )
+        await run.initialize()
+        await run.transition(RunStatus.PREPARING)
+        await run.transition(RunStatus.RUNNING)
+        step = await run.start_step("launch", ["app_launch"])
+        await run.finish_step(step, success=True, result="ok")
+        await run.succeed()
+
+        assert persistence.runs[-1]["status"] == "succeeded"
+        assert persistence.steps[-1]["status"] == "succeeded"
+        assert persistence.events[-1]["type"] == "run.completed"
+
+    asyncio.run(check())
