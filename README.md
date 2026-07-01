@@ -5,6 +5,10 @@
 
 产品设计见 [Electron MVP Spec](specs/electron_desktop_agent_mvp.md)。
 
+准备在 Windows 实机或 VM 上运行时，请先阅读
+[Windows 运行与测试指南](docs/WINDOWS_RUNBOOK.md)。该文档包含环境准备、模型配置、
+CLI/Runtime API 启动、WinPeekaboo 原子操作验证、Outlook/Edge/Teams 验收项和问题反馈模板。
+
 ## 当前能力
 
 - Windows 桌面：通过 WinPeekaboo 启动应用、管理窗口、枚举 UIA 元素以及执行键鼠操作。
@@ -244,9 +248,12 @@ specs/          产品和架构规范
 
 ```powershell
 pip install -e ".[dev]"
-pytest
-ruff check .
+python -m pytest -q
+python -m ruff check runtime skills tasks config credentials llm tests --exclude tests/vision_bbox
 ```
+
+当前基线包含 27 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：
 
