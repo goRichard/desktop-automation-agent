@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-46 passed
+51 passed
 ```
 
 测试覆盖：
@@ -209,7 +209,7 @@ python -m pytest -q
 | Runtime | Run/Step/Event 状态、暂停/恢复、确认、取消、桌面互斥、Token 累计 |
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
-| Skill | Schema、版本生命周期、输入、重试、嵌套 Skill、执行策略 |
+| Skill | Schema、版本生命周期、输入、快捷键批处理、嵌套 Skill、执行策略 |
 | Action Verification | 分层检查点、新窗口跟随、执行记忆、警告/失败语义 |
 | Task/Scheduler | Cron、时区、手动执行、旧任务迁移 |
 
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 46 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 51 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -481,6 +481,11 @@ asyncio.run(main())
 `execution_memory`：之前成功的 `find_and_click`、`type_text` 等动作应按顺序存在，敏感
 字段应显示为 `<redacted>`。如需诊断每一步，可临时设置 `mode: all`；`mode: off` 仅建议
 用于无副作用的开发测试。
+
+验证输出会显示 `[验证触发]`，可能值包括 `window_transition`、`high_risk`、
+`periodic_checkpoint`、`final_step` 和 `all_actions`。如果每一步都有验证，先通过 `/config`
+确认 `Verification` 不是 `all`，再检查触发原因；普通文本中出现“发送”不会再被误判为
+高风险，只有实际按钮目标或 `Alt+S`/`Ctrl+Enter` 等发送动作会触发高风险验证。
 
 ## 10. Task/Cron 测试
 

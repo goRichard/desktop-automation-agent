@@ -127,6 +127,7 @@ async def test_verify_step_uses_current_step_and_new_window(monkeypatch) -> None
     assert captured["window"] == "Untitled - Message"
     assert captured["wait_seconds"] == 1.2
     assert "app_launch" in captured["expected"]
+    assert "[验证触发] window_transition" in result
     assert "[验证截图目标] Untitled - Message" in result
 
 
@@ -177,6 +178,34 @@ def test_checkpoint_policy_verifies_new_windows_and_high_risk_actions() -> None:
     assert loop._verification_reason(send, [{"content": "clicked", "success": True}]) == (
         "high_risk"
     )
+
+    shortcut = [ToolCall("send", "hotkey", {"keys": "Alt+S"})]
+    assert loop._verification_reason(
+        shortcut,
+        [{"content": "sent", "success": True}],
+    ) == "high_risk"
+
+
+def test_high_risk_context_does_not_mark_normal_text_input() -> None:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.settings = SimpleNamespace(verification={
+        "mode": "checkpoint",
+        "checkpointInterval": 10,
+        "verifyFinalStep": False,
+        "verifyWindowTransitions": False,
+        "verifyHighRiskActions": True,
+    })
+    loop._plan = AgentLoop._parse_plan(
+        "1. 发送邮件流程：填写主题（type_text）\n"
+        "2. 检查草稿（list_windows）"
+    )
+    assert loop._plan is not None
+    call = [ToolCall("type", "type_text", {"text": "Please send the report"})]
+
+    assert loop._verification_reason(
+        call,
+        [{"content": "typed", "success": True}],
+    ) is None
 
 
 def test_execution_memory_is_compact_and_redacts_secrets() -> None:

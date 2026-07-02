@@ -344,6 +344,8 @@ MVP 支持：
 - `ui.click`
 - `ui.type`
 - `ui.key`
+- `ui.hotkey`
+- `ui.actions`
 - `ui.scroll`
 - `ui.wait`
 - `browser.navigate`

@@ -783,7 +783,6 @@ class AgentLoop:
 
         if config.get("verifyHighRiskActions", True) and _is_high_risk_action(
             tool_calls,
-            self._plan.current_step.description if self._plan and self._plan.current_step else "",
         ):
             return "high_risk"
 
@@ -850,7 +849,11 @@ class AgentLoop:
                 wait_seconds=wait_seconds,
             )
             screenshot_target = target_window or "当前前台窗口/全屏"
-            return f"[屏幕观察] {result}\n[验证截图目标] {screenshot_target}"
+            return (
+                f"[屏幕观察] {result}\n"
+                f"[验证触发] {reason}\n"
+                f"[验证截图目标] {screenshot_target}"
+            )
 
         except Exception as e:
             return f"[屏幕观察] ⚠️ 观察过程出错: {type(e).__name__}: {e}"
@@ -966,16 +969,20 @@ _HIGH_RISK_ACTION_TERMS = (
 )
 
 
-def _is_high_risk_action(tool_calls: list, step_description: str) -> bool:
-    text = " ".join([
-        step_description,
-        *(
-            f"{tool_call.name} "
-            f"{json.dumps(tool_call.arguments, ensure_ascii=False, default=str)}"
-            for tool_call in tool_calls
-        ),
-    ]).lower()
-    return any(term in text for term in _HIGH_RISK_ACTION_TERMS)
+def _is_high_risk_action(tool_calls: list) -> bool:
+    for tool_call in tool_calls:
+        raw_arguments = tool_call.arguments or {}
+        action_target = " ".join(
+            str(raw_arguments.get(key) or "")
+            for key in ("target", "on", "name", "description", "button")
+        ).lower()
+        if any(term in action_target for term in _HIGH_RISK_ACTION_TERMS):
+            return True
+        if tool_call.name == "hotkey":
+            keys = str(raw_arguments.get("keys") or "").lower().replace(" ", "")
+            if keys in {"alt+s", "ctrl+enter"}:
+                return True
+    return False
 
 
 def _sanitize_action_value(value: Any, key: str = "") -> Any:

@@ -59,6 +59,7 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         environment = client.get("/runtime/environment", headers=headers)
         assert environment.status_code == 200
         assert environment.json()["browser"]["channel"] == "msedge"
+        assert environment.json()["verification"]["mode"] == "checkpoint"
         assert client.get("/runs", headers=headers).status_code == 200
 
         models = client.get("/models", headers=headers)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,58 @@ def test_schema_and_legacy_markdown_compatibility(tmp_path: Path) -> None:
     assert repository.import_definitions([parsed]) == 1
     assert repository.import_definitions([parsed]) == 0
     assert repository.get("daily-report")["versions"][0]["sourceFormat"] == "markdown"
+
+
+def test_outlook_skill_prefers_bounded_keyboard_shortcuts() -> None:
+    skill_path = (
+        Path(__file__).parents[1]
+        / "skills"
+        / "user_skills"
+        / "send_outlook_email"
+        / "SKILL.md"
+    )
+    content = skill_path.read_text(encoding="utf-8")
+    assert "Ctrl+N" in content
+    assert "Alt+S" in content
+    assert "run_actions" in content
+    assert "必须完成用户确认" in content
+
+
+@pytest.mark.asyncio
+async def test_structured_skill_batches_keyboard_actions(monkeypatch) -> None:
+    captured = {}
+
+    async def run_actions(**parameters):
+        captured.update(parameters)
+        return "ok"
+
+    monkeypatch.setattr(
+        "skills.executor.get_tool",
+        lambda name: run_actions if name == "run_actions" else None,
+    )
+    value = skill_value()
+    value["execution"]["steps"] = [{
+        "id": "fill",
+        "name": "Fill with keyboard",
+        "action": "ui.actions",
+        "with": {
+            "actions": [
+                {"tool": "type_text", "args": {"text": "{{ input.recipient }}"}},
+                {"tool": "press_key", "args": {"key": "Enter"}},
+                {"tool": "press_key", "args": {"key": "Tab"}},
+            ]
+        },
+    }]
+
+    result = await SkillExecutor().execute(
+        SkillDocument.model_validate(value),
+        {"recipient": "person@example.com"},
+    )
+
+    actions = json.loads(captured["actions"])
+    assert actions[0]["args"]["text"] == "person@example.com"
+    assert actions[1]["args"]["key"] == "Enter"
+    assert result["steps"][0]["tool"] == "run_actions"
 
 
 def test_skill_repository_lifecycle(tmp_path: Path) -> None:

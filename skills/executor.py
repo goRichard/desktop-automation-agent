@@ -30,6 +30,7 @@ ACTION_TO_TOOL = {
     "ui.type": "type_text",
     "ui.key": "press_key",
     "ui.hotkey": "hotkey",
+    "ui.actions": "run_actions",
     "ui.scroll": "scroll",
     "ui.wait": "sleep",
     "browser.navigate": "browser_navigate",
@@ -439,6 +440,8 @@ class SkillExecutor:
             result["name"] = result.pop("title")
         if action == "ui.wait" and "duration" in result and "seconds" not in result:
             result["seconds"] = result.pop("duration")
+        if action == "ui.actions" and isinstance(result.get("actions"), list):
+            result["actions"] = json.dumps(result["actions"], ensure_ascii=False)
         if action in {"ui.click", "ui.locate"} and "description" in result:
             result["target"] = result.pop("description")
         if action in {"ui.click", "ui.locate"}:

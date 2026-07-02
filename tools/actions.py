@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 from .registry import tool
 
@@ -103,19 +103,27 @@ async def run_actions(actions: str) -> str:
     try:
         action_list = json.loads(actions)
     except json.JSONDecodeError as e:
-        return f"actions 格式错误（需为 JSON 数组）: {e}"
+        raise ValueError(f"actions 格式错误（需为 JSON 数组）: {e}") from e
 
     if not isinstance(action_list, list):
-        return "actions 必须是 JSON 数组"
+        raise ValueError("actions 必须是 JSON 数组")
 
     if len(action_list) > 30:
-        return f"操作数量过多（{len(action_list)}），最多支持 30 个"
+        raise ValueError(f"操作数量过多（{len(action_list)}），最多支持 30 个")
 
     results: list[str] = []
+    failures: list[str] = []
     for i, action in enumerate(action_list):
         tool_name = action.get("tool", "?")
         result = await _dispatch(action)
         results.append(f"  [{i+1}] {tool_name}: {result}")
+        if result.startswith(("不支持的操作", "参数错误", "执行失败", "未知操作")):
+            failures.append(result)
 
     summary = f"批量执行完成（{len(action_list)} 个操作）:\n" + "\n".join(results)
+    if failures:
+        raise RuntimeError(
+            f"批量执行失败（{len(failures)}/{len(action_list)} 个子动作失败）:\n"
+            + "\n".join(results)
+        )
     return summary

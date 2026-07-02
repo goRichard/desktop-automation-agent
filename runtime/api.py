@@ -180,6 +180,7 @@ def create_app(
             "database": str(settings.memory_db),
             "skillsDirectory": str(settings.skills_dir),
             "browser": settings.browser,
+            "verification": settings.verification,
             "desktopLockOwner": desktop_execution_lock.owner_run_id,
         }
 

@@ -220,7 +220,8 @@ class Settings(BaseSettings):
         return (
             f"Profile: {self.active_profile} | "
             f"Chat: {chat.provider.value}/{chat.model} | "
-            f"Vision: {vision.provider.value}/{vision.model}"
+            f"Vision: {vision.provider.value}/{vision.model} | "
+            f"Verification: {self.verification.get('mode', 'checkpoint')}"
         )
 
 
