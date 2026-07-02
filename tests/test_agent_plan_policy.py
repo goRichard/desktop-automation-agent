@@ -126,7 +126,7 @@ async def test_policy_violation_gets_one_correction_then_plan_continues(monkeypa
     monkeypatch.setattr("agent.loop.save_message", lambda *_, **__: None)
     monkeypatch.setattr("agent.loop.update_session_title", lambda *_, **__: None)
     monkeypatch.setattr("agent.loop.tool_dispatcher.execute", fake_execute)
-    monkeypatch.setattr("agent.loop.AgentLoop._should_verify", lambda *_: False)
+    monkeypatch.setattr("agent.loop.AgentLoop._verification_reason", lambda *_: None)
 
     loop = AgentLoop.__new__(AgentLoop)
     loop.settings = SimpleNamespace(max_iterations=5)

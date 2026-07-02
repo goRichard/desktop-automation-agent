@@ -40,6 +40,13 @@ def test_runtime_state_is_persisted(tmp_path) -> None:
             role="chat",
             model="test-model",
         ))
+        await run.record_execution_action({
+            "sequence": 1,
+            "tool": "type_text",
+            "arguments": {"text": "hello"},
+            "success": True,
+            "result": "typed",
+        })
         step = await run.start_step("demo", ["sleep"])
         await run.finish_step(step, success=True, result="ok")
         run.state.output = "done"
@@ -57,6 +64,7 @@ def test_runtime_state_is_persisted(tmp_path) -> None:
     assert context.skill_version == "1.0.0"
     assert context.inputs == '{"name": "demo"}'
     assert '"total_tokens": 100' in context.token_usage
+    assert '"tool": "type_text"' in context.execution_memory
     assert len(list_runtime_steps("persisted-run")) == 1
     assert len(list_runtime_events("persisted-run")) >= 5
 
@@ -85,4 +93,4 @@ def test_existing_runtime_context_table_gets_token_usage_migration(tmp_path) -> 
                 "PRAGMA table_info(runtime_run_contexts)"
             )
         }
-    assert "token_usage" in columns
+    assert {"token_usage", "execution_memory"} <= columns

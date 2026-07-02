@@ -355,7 +355,13 @@ class RuntimeManager:
 
     @staticmethod
     def _context_record_to_dict(record: Any) -> dict[str, Any]:
-        value = record.model_dump(exclude={"run_id", "inputs", "token_usage"})
+        value = record.model_dump(exclude={
+            "run_id",
+            "inputs",
+            "token_usage",
+            "execution_memory",
+        })
         value["inputs"] = json.loads(record.inputs)
         value["token_usage"] = json.loads(record.token_usage) or empty_token_usage()
+        value["execution_memory"] = json.loads(record.execution_memory)
         return value

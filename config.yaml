@@ -87,6 +87,12 @@ agent:
   skills_dir: ./skills/user_skills
   memory_db: ./data/agent.db
   evidence_dir: ./data/run_evidence
+  verification:
+    mode: checkpoint                 # checkpoint | all | off
+    checkpointInterval: 3            # 每完成 3 个计划步骤做一次视觉检查
+    verifyWindowTransitions: true    # 新窗口/应用启动时检查
+    verifyFinalStep: true            # 最后一个计划步骤检查
+    verifyHighRiskActions: true      # Send/Submit/Delete 等操作检查
   system_prompt: |
     你是一个强大的 Windows 桌面自动化 Agent，类似 Claude Code。
     你可以通过工具控制桌面、识别屏幕内容、执行自动化任务。

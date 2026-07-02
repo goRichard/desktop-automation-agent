@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-42 passed
+46 passed
 ```
 
 测试覆盖：
@@ -210,7 +210,7 @@ python -m pytest -q
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
 | Skill | Schema、版本生命周期、输入、重试、嵌套 Skill、执行策略 |
-| Action Verification | 新窗口跟随、旧窗口保护、稳定等待、警告/失败语义 |
+| Action Verification | 分层检查点、新窗口跟随、执行记忆、警告/失败语义 |
 | Task/Scheduler | Cron、时区、手动执行、旧任务迁移 |
 
 当前可能出现两个已知 warning：
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 42 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 46 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -313,7 +313,8 @@ Invoke-RestMethod "$baseUrl/runs" -Headers $headers
 - 带 Token 时各接口返回 JSON。
 - `/runtime/environment` 的数据库和 Skill 路径指向当前配置目录。
 - `/models` 不返回 API Key 或环境变量名。
-- Run 响应包含 `token_usage`；模型调用后 Event 历史包含 `run.usage`。
+- Run 响应包含 `token_usage` 和 `execution_memory`；Event 历史包含 `run.usage` 和
+  `run.execution_memory`。
 
 CLI 执行期间应在每次模型响应后看到类似输出：
 
@@ -475,6 +476,11 @@ asyncio.run(main())
 验证结果中的 `⚠️ 无法确定` 只表示截图遮挡、加载中或视觉模型无法判断，不会立即中止
 计划；`❌ 不符合预期` 才表示明确失败。对于新建邮件、打开对话框等场景，如果
 `[验证截图目标]` 仍显示旧窗口，请同时保留工具原始返回和截图用于排查。
+
+默认 `checkpoint` 模式不会在每个输入动作后调用 Vision。测试时检查 Run 的
+`execution_memory`：之前成功的 `find_and_click`、`type_text` 等动作应按顺序存在，敏感
+字段应显示为 `<redacted>`。如需诊断每一步，可临时设置 `mode: all`；`mode: off` 仅建议
+用于无副作用的开发测试。
 
 ## 10. Task/Cron 测试
 

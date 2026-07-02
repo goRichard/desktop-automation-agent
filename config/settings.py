@@ -192,6 +192,16 @@ class Settings(BaseSettings):
         )
 
     @property
+    def verification(self) -> dict[str, Any]:
+        return dict(self.agent.get("verification") or {
+            "mode": "checkpoint",
+            "checkpointInterval": 3,
+            "verifyWindowTransitions": True,
+            "verifyFinalStep": True,
+            "verifyHighRiskActions": True,
+        })
+
+    @property
     def browser(self) -> dict[str, Any]:
         return dict(self._raw.get("browser", {"channel": "msedge"}))
 

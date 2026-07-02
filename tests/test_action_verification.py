@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agent.loop import (
     AgentLoop,
     _append_verification,
+    _execution_memory_summary,
+    _messages_with_execution_memory,
+    _sanitize_action_value,
     _verification_target_window,
     _verification_wait_seconds,
 )
@@ -107,10 +112,98 @@ async def test_verify_step_uses_current_step_and_new_window(monkeypatch) -> None
                 '🔄 检测到新窗口已弹出，已自动激活: "Untitled - Message"'
             )
         }],
+        "window_transition",
+        [{
+            "sequence": 1,
+            "planStepId": 1,
+            "tool": "app_launch",
+            "arguments": {"name": "outlook.exe"},
+            "success": True,
+        }],
     )
 
     assert "点击 New Email" in captured["expected"]
     assert "填写收件人" not in captured["expected"]
     assert captured["window"] == "Untitled - Message"
     assert captured["wait_seconds"] == 1.2
+    assert "app_launch" in captured["expected"]
     assert "[验证截图目标] Untitled - Message" in result
+
+
+def test_checkpoint_policy_skips_each_text_action_and_verifies_periodically() -> None:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.settings = SimpleNamespace(verification={
+        "mode": "checkpoint",
+        "checkpointInterval": 3,
+        "verifyWindowTransitions": True,
+        "verifyFinalStep": False,
+        "verifyHighRiskActions": True,
+    })
+    loop._plan = AgentLoop._parse_plan(
+        "1. 填写收件人（type_text）\n"
+        "2. 填写主题（type_text）\n"
+        "3. 填写正文（type_text）\n"
+        "4. 检查草稿（list_windows）"
+    )
+    assert loop._plan is not None
+
+    call = [ToolCall("type", "type_text", {"text": "value"})]
+    result = [{"content": "typed", "success": True}]
+    assert loop._verification_reason(call, result) is None
+
+    loop._plan.current_step_index = 2
+    assert loop._verification_reason(call, result) == "periodic_checkpoint"
+
+    loop.settings.verification = {"mode": "all"}
+    assert loop._verification_reason(call, result) == "all_actions"
+    loop.settings.verification = {"mode": "off"}
+    assert loop._verification_reason(call, result) is None
+
+
+def test_checkpoint_policy_verifies_new_windows_and_high_risk_actions() -> None:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.settings = SimpleNamespace(verification={"mode": "checkpoint"})
+    loop._plan = AgentLoop._parse_plan(
+        "1. 新建邮件（find_and_click）\n2. 发送邮件（find_and_click）"
+    )
+    assert loop._plan is not None
+
+    new_window = [ToolCall("new", "find_and_click", {"target": "New Email"})]
+    result = [{"content": "检测到新窗口已弹出", "success": True}]
+    assert loop._verification_reason(new_window, result) == "window_transition"
+
+    loop._plan.current_step_index = 1
+    send = [ToolCall("send", "find_and_click", {"target": "Send"})]
+    assert loop._verification_reason(send, [{"content": "clicked", "success": True}]) == (
+        "high_risk"
+    )
+
+
+def test_execution_memory_is_compact_and_redacts_secrets() -> None:
+    sanitized = _sanitize_action_value({
+        "text": "hello",
+        "api_key": "private",
+        "nested": {"password": "private"},
+    })
+    assert sanitized["text"] == "hello"
+    assert sanitized["api_key"] == "<redacted>"
+    assert sanitized["nested"]["password"] == "<redacted>"
+
+    memory = [{
+        "sequence": 1,
+        "planStepId": 2,
+        "tool": "type_text",
+        "arguments": sanitized,
+        "success": True,
+    }]
+    summary = _execution_memory_summary(memory)
+    assert "type_text" in summary
+    assert "hello" in summary
+    assert "private" not in summary
+
+    messages = _messages_with_execution_memory(
+        [{"role": "system", "content": "base"}, {"role": "user", "content": "go"}],
+        memory,
+    )
+    assert "当前 Run 的执行记忆" in messages[0]["content"]
+    assert messages[1]["content"] == "go"

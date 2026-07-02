@@ -67,7 +67,7 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 
 
 def _apply_incremental_migrations() -> None:
@@ -81,6 +81,12 @@ def _apply_incremental_migrations() -> None:
             connection.execute(text(
                 "ALTER TABLE runtime_run_contexts "
                 "ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'"
+            ))
+    if "execution_memory" not in context_columns:
+        with _engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE runtime_run_contexts "
+                "ADD COLUMN execution_memory TEXT NOT NULL DEFAULT '[]'"
             ))
 
 
@@ -409,6 +415,10 @@ def upsert_runtime_run(value: dict[str, Any]) -> RuntimeRun:
         context.inputs = json.dumps(value.get("inputs", {}), ensure_ascii=False)
         context.token_usage = json.dumps(
             value.get("token_usage", {}),
+            ensure_ascii=False,
+        )
+        context.execution_memory = json.dumps(
+            value.get("execution_memory", []),
             ensure_ascii=False,
         )
         db.add(context)

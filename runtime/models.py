@@ -90,6 +90,7 @@ class RunState:
     error: Optional[str] = None
     output: str = ""
     token_usage: dict[str, Any] = field(default_factory=empty_token_usage)
+    execution_memory: list[dict[str, Any]] = field(default_factory=list)
     steps: list[StepRunState] = field(default_factory=list)
 
     @property

@@ -165,6 +165,7 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
         assert guided_run["run_type"] == "skill"
         assert guided_run["skill_version"] == "1.0.0"
         assert guided_run["token_usage"]["model_calls"] == 0
+        assert guided_run["execution_memory"][0]["tool"] == "sleep"
         assert guided_run["steps"][0]["tool_names"] == ["sleep"]
 
         step_run = client.post(

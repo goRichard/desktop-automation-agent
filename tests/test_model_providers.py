@@ -101,6 +101,7 @@ def test_settings_support_preferred_profile_models(tmp_path, monkeypatch) -> Non
     settings = Settings()
     assert settings.chat_model.provider == ProviderType.OLLAMA
     assert settings.vision_model.capabilities.vision is True
+    assert settings.verification["mode"] == "checkpoint"
 
 
 def test_resolved_secret_is_private() -> None:

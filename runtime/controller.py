@@ -219,6 +219,22 @@ class RunController:
             },
         )
 
+    async def record_execution_action(self, action: dict[str, Any]) -> None:
+        """Append a compact successful/failed action fact to the Run memory."""
+        entry = deepcopy(action)
+        self.state.execution_memory.append(entry)
+        # Keep the persisted/API payload bounded during long unattended Runs.
+        if len(self.state.execution_memory) > 100:
+            self.state.execution_memory = self.state.execution_memory[-100:]
+        await self._persist_run()
+        await self.emit(
+            "run.execution_memory",
+            {
+                "entry": entry,
+                "size": len(self.state.execution_memory),
+            },
+        )
+
     async def succeed(self) -> None:
         if not self.state.is_terminal:
             await self.transition(RunStatus.SUCCEEDED)

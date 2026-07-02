@@ -254,8 +254,12 @@ class AgentLoop:
         for iteration in range(self.settings.max_iterations):
             await controller.checkpoint()
             iteration_tools = self._tools_for_current_plan_step(tools)
+            request_messages = _messages_with_execution_memory(
+                messages,
+                controller.state.execution_memory,
+            )
             try:
-                response = await self.llm.chat(messages, tools=iteration_tools)
+                response = await self.llm.chat(request_messages, tools=iteration_tools)
             except Exception as e:
                 if _is_context_overflow(e):
                     overflow_message = _context_overflow_msg()
@@ -340,21 +344,35 @@ class AgentLoop:
                 else:
                     tool_results = await tool_dispatcher.execute(response.tool_calls)
 
-                # ── 步骤验证：用多模态模型检查操作是否成功 ──
+                # ── 分层验证：仅在检查点/窗口切换/高风险/最终步骤使用视觉模型 ──
+                verification = None
                 if (
                     confirmed_plan
                     and not policy_error
                     and all(result.get("success", True) for result in tool_results)
-                    and self._should_verify(response.tool_calls)
                 ):
-                    verification = await self._verify_step(
+                    verification_reason = self._verification_reason(
                         response.tool_calls,
                         tool_results,
                     )
-                    if verification:
+                    if verification_reason:
+                        verification = await self._verify_step(
+                            response.tool_calls,
+                            tool_results,
+                            verification_reason,
+                            controller.state.execution_memory,
+                        )
                         _append_verification(tool_results, verification)
                         if on_tool_result:
                             await _maybe_await(on_tool_result("verify_action_result", verification))
+
+                if not policy_error:
+                    await self._record_execution_memory(
+                        controller,
+                        response.tool_calls,
+                        tool_results,
+                        verification,
+                    )
 
                 for tr in tool_results:
                     save_message(
@@ -721,7 +739,7 @@ class AgentLoop:
     # 不需要视觉验证的工具：纯查询、后台静默执行、不改变 UI 状态的操作
     _NO_VERIFY_TOOLS = {
         # 窗口/系统查询
-        "list_windows", "path_exists", "list_dir",
+        "list_windows", "path_exists", "list_dir", "read_file", "write_file",
         # 等待/时间控制
         "sleep",
         # 剪贴板操作
@@ -736,20 +754,66 @@ class AgentLoop:
         "create_plan",
     }
 
-    def _should_verify(self, tool_calls: list) -> bool:
-        """判断是否需要执行步骤验证"""
+    def _has_visible_action(self, tool_calls: list) -> bool:
         if not tool_calls:
             return False
-        # 如果所有工具都是纯查询类，不需要验证
-        for tc in tool_calls:
-            if tc.name not in self._NO_VERIFY_TOOLS:
-                return True
-        return False
+        return any(tc.name not in self._NO_VERIFY_TOOLS for tc in tool_calls)
+
+    def _verification_reason(
+        self,
+        tool_calls: list,
+        tool_results: list[dict],
+    ) -> Optional[str]:
+        """Return why a costly visual verification is required, or None to skip it."""
+        if not self._has_visible_action(tool_calls):
+            return None
+
+        config = getattr(getattr(self, "settings", None), "verification", {}) or {}
+        mode = str(config.get("mode", "checkpoint")).lower()
+        if mode == "off":
+            return None
+        if mode == "all":
+            return "all_actions"
+
+        if config.get("verifyWindowTransitions", True) and (
+            _reported_new_window(tool_results)
+            or any(tc.name in {"app_launch", "app_switch"} for tc in tool_calls)
+        ):
+            return "window_transition"
+
+        if config.get("verifyHighRiskActions", True) and _is_high_risk_action(
+            tool_calls,
+            self._plan.current_step.description if self._plan and self._plan.current_step else "",
+        ):
+            return "high_risk"
+
+        if not self._plan_step_will_complete(tool_calls):
+            return None
+
+        if self._plan and self._plan.current_step:
+            index = self._plan.current_step_index
+            if config.get("verifyFinalStep", True) and index == len(self._plan.steps) - 1:
+                return "final_step"
+            interval = max(1, int(config.get("checkpointInterval", 3) or 3))
+            if (index + 1) % interval == 0:
+                return "periodic_checkpoint"
+        return None
+
+    def _plan_step_will_complete(self, tool_calls: list) -> bool:
+        if not self._plan or not self._plan.current_step:
+            return False
+        step = self._plan.current_step
+        completed = set(step.completed_tools) | {tool_call.name for tool_call in tool_calls}
+        return bool(step.expected_tools) and all(
+            tool_name in completed for tool_name in step.expected_tools
+        )
 
     async def _verify_step(
         self,
         tool_calls: list,
         tool_results: list[dict],
+        reason: str,
+        execution_memory: list[dict],
     ) -> Optional[str]:
         """
         用多模态模型验证当前步骤是否成功。
@@ -771,8 +835,11 @@ class AgentLoop:
             expected = (
                 f"当前计划步骤（仅作为上下文，可能尚未完成）：{step_description}\n"
                 f"刚执行的工具：{tool_summary}\n"
+                f"验证原因：{reason}\n"
+                f"此前动作记录：\n{_execution_memory_summary(execution_memory)}\n"
                 "请只判断刚执行的工具是否产生了合理的直接可见效果。"
                 "不要要求当前步骤中尚未调用的其他工具已经完成，也不要检查后续计划步骤。"
+                "此前动作是执行记录；如果相关区域当前不可见，不要据此断言内容缺失。"
             )
             target_window = _verification_target_window(tool_calls, tool_results)
             wait_seconds = _verification_wait_seconds(tool_calls)
@@ -787,6 +854,31 @@ class AgentLoop:
 
         except Exception as e:
             return f"[屏幕观察] ⚠️ 观察过程出错: {type(e).__name__}: {e}"
+
+    async def _record_execution_memory(
+        self,
+        controller: RunController,
+        tool_calls: list,
+        tool_results: list[dict],
+        verification: Optional[str],
+    ) -> None:
+        step = self._plan.current_step if self._plan else None
+        result_by_id = {
+            result.get("tool_call_id"): result for result in tool_results
+        }
+        for tool_call in tool_calls:
+            result = result_by_id.get(tool_call.id, {})
+            entry = {
+                "sequence": len(controller.state.execution_memory) + 1,
+                "planStepId": step.id if step else None,
+                "planStep": step.description if step else None,
+                "tool": tool_call.name,
+                "arguments": _sanitize_action_value(tool_call.arguments),
+                "success": bool(result.get("success", True)),
+                "result": str(result.get("content") or "")[:300],
+                "verification": verification,
+            }
+            await controller.record_execution_action(entry)
 
 
 _WINDOW_TRANSITION_TOOLS = {
@@ -845,6 +937,102 @@ def _verification_wait_seconds(tool_calls: list) -> float:
     if "app_switch" in names or names & _WINDOW_TRANSITION_TOOLS:
         return 1.2
     return 0.5
+
+
+def _reported_new_window(tool_results: list[dict]) -> bool:
+    return any(
+        "检测到新窗口" in str(result.get("content") or "")
+        or "window_title:" in str(result.get("content") or "")
+        for result in tool_results
+    )
+
+
+_HIGH_RISK_ACTION_TERMS = (
+    "send",
+    "submit",
+    "delete",
+    "remove",
+    "confirm",
+    "publish",
+    "save",
+    "发送",
+    "提交",
+    "删除",
+    "移除",
+    "确认",
+    "发布",
+    "保存",
+    "付款",
+)
+
+
+def _is_high_risk_action(tool_calls: list, step_description: str) -> bool:
+    text = " ".join([
+        step_description,
+        *(
+            f"{tool_call.name} "
+            f"{json.dumps(tool_call.arguments, ensure_ascii=False, default=str)}"
+            for tool_call in tool_calls
+        ),
+    ]).lower()
+    return any(term in text for term in _HIGH_RISK_ACTION_TERMS)
+
+
+def _sanitize_action_value(value: Any, key: str = "") -> Any:
+    normalized_key = key.lower().replace("-", "_")
+    if any(term in normalized_key for term in ("password", "secret", "token", "api_key")):
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_action_value(child_value, str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_action_value(item, key) for item in value[:20]]
+    if isinstance(value, str) and len(value) > 120:
+        return value[:120] + "…"
+    return value
+
+
+def _execution_memory_summary(execution_memory: list[dict], limit: int = 12) -> str:
+    if not execution_memory:
+        return "- 无"
+    lines = []
+    for entry in execution_memory[-limit:]:
+        status = "成功" if entry.get("success") else "失败"
+        arguments = json.dumps(
+            entry.get("arguments", {}),
+            ensure_ascii=False,
+            default=str,
+        )
+        lines.append(
+            f"- #{entry.get('sequence')} 步骤 {entry.get('planStepId')}: "
+            f"{entry.get('tool')}({arguments[:180]}) -> {status}"
+        )
+    return "\n".join(lines)
+
+
+def _messages_with_execution_memory(
+    messages: list[dict[str, Any]],
+    execution_memory: list[dict],
+) -> list[dict[str, Any]]:
+    if not execution_memory:
+        return messages
+    memory_prompt = (
+        "## 当前 Run 的执行记忆（由 Runtime 记录）\n"
+        f"{_execution_memory_summary(execution_memory)}\n"
+        "后续操作必须基于这些执行事实；不要重复成功的点击或输入，失败项可用于恢复判断。"
+    )
+    request_messages = [dict(message) for message in messages]
+    if request_messages and request_messages[0].get("role") == "system":
+        request_messages[0]["content"] = (
+            str(request_messages[0].get("content") or "")
+            + "\n\n"
+            + memory_prompt
+        )
+    else:
+        request_messages.insert(0, {"role": "system", "content": memory_prompt})
+    return request_messages
 
 
 def _append_verification(tool_results: list[dict], verification: str) -> None:

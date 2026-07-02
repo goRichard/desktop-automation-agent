@@ -202,3 +202,27 @@ def test_model_usage_is_accumulated_and_emitted() -> None:
         assert usage_events[1].data["cumulative"]["model_calls"] == 2
 
     asyncio.run(check())
+
+
+def test_execution_actions_are_remembered_and_emitted() -> None:
+    async def check() -> None:
+        run = RunController("session", "demo", run_id="run-memory")
+        await run.initialize()
+        await run.record_execution_action({
+            "sequence": 1,
+            "planStepId": 2,
+            "tool": "type_text",
+            "arguments": {"text": "hello"},
+            "success": True,
+            "result": "typed",
+        })
+
+        assert run.state.execution_memory[0]["tool"] == "type_text"
+        events = [
+            event for event in run.events.history(run.state.id)
+            if event.type == "run.execution_memory"
+        ]
+        assert len(events) == 1
+        assert events[0].data["entry"]["arguments"]["text"] == "hello"
+
+    asyncio.run(check())

@@ -186,6 +186,7 @@ class RuntimeRunContext(SQLModel, table=True):
     execution_mode: Optional[str] = None
     inputs: str = Field(default="{}", description="JSON encoded Skill inputs")
     token_usage: str = Field(default="{}", description="JSON encoded model token usage")
+    execution_memory: str = Field(default="[]", description="JSON encoded action memory")
 
 
 class RuntimeStepRun(SQLModel, table=True):

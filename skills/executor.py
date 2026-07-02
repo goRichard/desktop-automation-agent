@@ -118,6 +118,25 @@ class SkillExecutor:
                     )
                 results.append(result)
                 context["steps"][step.id] = result
+                if controller:
+                    try:
+                        memory_arguments = _redact_memory_value(
+                            self._resolve({**step.target, **step.parameters}, context)
+                        )
+                    except Exception:
+                        memory_arguments = {"unavailable": True}
+                    await controller.record_execution_action({
+                        "sequence": len(controller.state.execution_memory) + 1,
+                        "skillStepId": step.id,
+                        "skillStep": step.name,
+                        "tool": result.get("tool", step.action),
+                        "arguments": memory_arguments,
+                        "success": bool(result["success"]),
+                        "result": self._result_text(
+                            result.get("output") or result.get("error") or ""
+                        )[:300],
+                        "verification": result.get("verification"),
+                    })
                 if not result["success"] and step.on_failure == "stop":
                     raise SkillExecutionError(
                         f"Skill step failed: {step.id}: {result.get('error', 'unknown error')}"
@@ -538,3 +557,19 @@ class SkillExecutor:
             return
         async with desktop_execution_lock.hold(controller):
             yield
+
+
+def _redact_memory_value(value: Any, key: str = "") -> Any:
+    normalized_key = key.lower().replace("-", "_")
+    if any(term in normalized_key for term in ("password", "secret", "token", "api_key")):
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {
+            str(child_key): _redact_memory_value(child_value, str(child_key))
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_memory_value(item, key) for item in value[:20]]
+    if isinstance(value, str) and len(value) > 120:
+        return value[:120] + "…"
+    return value

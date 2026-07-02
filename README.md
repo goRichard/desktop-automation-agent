@@ -186,10 +186,24 @@ CLI 会在每次 Chat/Vision 模型响应后显示当前 Run 的累计 Token 用
 如果某个 OpenAI-compatible/Ollama 服务没有返回 `usage`，模型调用次数仍会记录，并明确
 标记未报告的调用；此时 Token 累计值可能不完整。
 
-计划动作的视觉验证只判断刚执行工具的直接效果，不再额外调用 Chat 模型生成预期。工具
-报告新窗口时截图跟随新窗口；可能发生窗口切换但没有可靠标题时保持当前前台窗口，不会
-重新激活旧窗口。验证输出包含 `[验证截图目标]` 便于排查。`⚠️ 无法确定` 作为观察提示，
-只有明确的 `❌ 不符合预期` 才会把工具结果标记为失败。
+视觉验证默认使用分层检查点，不再对每次点击和输入都调用 Vision。每 3 个完成步骤、窗口
+切换、最终步骤和 Send/Submit/Delete 等高风险动作会触发验证。验证只判断刚执行工具的
+直接效果，不再额外调用 Chat 模型生成预期。工具报告新窗口时截图跟随新窗口；没有可靠
+标题时保持当前前台窗口。`⚠️ 无法确定` 作为提示，只有明确 `❌` 才标记失败。
+
+```yaml
+agent:
+  verification:
+    mode: checkpoint       # checkpoint | all | off
+    checkpointInterval: 3
+    verifyWindowTransitions: true
+    verifyFinalStep: true
+    verifyHighRiskActions: true
+```
+
+Run 同时维护结构化 `execution_memory`：记录计划/Skill 步骤、工具、脱敏参数、结果和验证
+状态。模型下一轮会收到最近 12 条精简记录，避免重复点击或输入；Run 最多持久化 100 条。
+`GET /runs/{id}` 返回该字段，Event 类型为 `run.execution_memory`。
 
 `condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
 固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
@@ -268,7 +282,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 42 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 46 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：
