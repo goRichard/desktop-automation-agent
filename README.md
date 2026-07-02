@@ -176,6 +176,11 @@ GET  /tasks/{id}/executions
 外部副作用还必须显式提供 `externalSideEffectsApproved: true`。Run 历史会保存 Skill ID、
 版本、模式和输入参数。
 
+用户确认执行计划后，Runtime 会按当前步骤收窄模型可见的工具：计划声明的工具负责完成
+步骤，`list_windows`、`list_elements`、截图等只读观察工具可以辅助判断状态，但不能代替
+计划动作。策略越界调用不会执行，模型有一次改正机会；再次越界或已授权工具实际执行失败
+时，计划才会停止。
+
 `condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
 固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
 会在 `data/run_evidence` 保存错误元数据，并尽力采集截图和目标窗口 UIA 信息。
@@ -249,10 +254,10 @@ specs/          产品和架构规范
 ```powershell
 pip install -e ".[dev]"
 python -m pytest -q
-python -m ruff check runtime skills tasks config credentials llm tests --exclude tests/vision_bbox
+python -m ruff check agent runtime skills tasks config credentials llm tests --exclude tests/vision_bbox
 ```
 
-当前基线包含 27 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 32 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

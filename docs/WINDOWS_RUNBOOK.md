@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-27 passed
+32 passed
 ```
 
 测试覆盖：
@@ -217,7 +217,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 27 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 32 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -227,7 +227,7 @@ python -m pytest -q 2>&1 |
 核心重构模块的静态检查：
 
 ```powershell
-python -m ruff check runtime skills tasks config credentials llm tests `
+python -m ruff check agent runtime skills tasks config credentials llm tests `
   --exclude tests/vision_bbox
 ```
 

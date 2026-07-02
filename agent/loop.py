@@ -32,6 +32,22 @@ from . import tool_dispatcher
 from .planner import TaskPlan, TaskStep, TaskStatus
 
 
+_PLAN_OBSERVATION_TOOLS = frozenset({
+    "analyze_image",
+    "analyze_screen",
+    "browser_get_state",
+    "browser_screenshot",
+    "capture_image",
+    "list_apps",
+    "list_elements",
+    "list_screens",
+    "list_windows",
+    "path_exists",
+    "sleep",
+})
+_MAX_POLICY_CORRECTIONS = 1
+
+
 class AgentLoop:
     """
     Agent 主循环
@@ -67,13 +83,17 @@ class AgentLoop:
         Plan-First: 根据 Skill 步骤 + 用户输入生成具体化执行计划。
         返回编号步骤列表文本（供用户确认）。
         """
+        available_tools = ", ".join(
+            schema["function"]["name"] for schema in get_all_schemas()
+        )
         prompt = (
             f"你是任务规划专家。根据以下 Skill 执行规范和用户请求，生成一份具体可执行的步骤计划。\n\n"
             f"## Skill 执行规范\n{skill_content}\n\n"
             f"## 用户请求\n{user_input}\n\n"
+            f"## 可用工具名\n{available_tools}\n\n"
             f"要求：\n"
             f"1. 将 Skill 步骤具体化，将用户提供的参数（如收件人、主题、附件路径等）填入对应位置\n"
-            f"2. 每个步骤必须明确指定使用的工具名（如 `batch_locate_elements`、`run_actions`、`click` 等）\n"
+            f"2. 每个步骤必须明确指定使用的工具名，且只能使用上面列出的准确名称\n"
             f"3. 步骤描述格式：`步骤描述（工具名）`，例如：`批量定位 To/Subject/Body 控件（batch_locate_elements）`\n"
             f"4. 仅返回编号列表，不要标题、不要 markdown 标记，格式如下：\n"
             f"1. 启动 Outlook 并新建邮件（app_launch + hotkey Ctrl+N）\n"
@@ -221,12 +241,15 @@ class AgentLoop:
                 if schema["function"]["name"] in allowed_tool_names
             ]
 
+        policy_corrections: dict[str, int] = {}
+        incomplete_plan_corrections: dict[int, int] = {}
 
         # ── 任务执行阶段 ───────────────────────────────────
         for iteration in range(self.settings.max_iterations):
             await controller.checkpoint()
+            iteration_tools = self._tools_for_current_plan_step(tools)
             try:
-                response = await self.llm.chat(messages, tools=tools)
+                response = await self.llm.chat(messages, tools=iteration_tools)
             except Exception as e:
                 if _is_context_overflow(e):
                     overflow_message = _context_overflow_msg()
@@ -347,6 +370,25 @@ class AgentLoop:
 
                 messages.extend(tool_dispatcher.to_openai_messages(tool_results))
 
+                if policy_error:
+                    policy_key = self._policy_scope_key()
+                    correction_count = policy_corrections.get(policy_key, 0) + 1
+                    policy_corrections[policy_key] = correction_count
+                    if correction_count <= _MAX_POLICY_CORRECTIONS:
+                        await controller.finish_step(
+                            runtime_step,
+                            success=False,
+                            error=policy_error,
+                        )
+                        messages.append({
+                            "role": "system",
+                            "content": self._policy_correction_message(
+                                policy_error,
+                                iteration_tools,
+                            ),
+                        })
+                        continue
+
                 # P1-3: 标记当前步骤进度
                 if self._plan:
                     plan_failure = self._advance_plan(response.tool_calls, tool_results)
@@ -368,6 +410,24 @@ class AgentLoop:
                         yield message
                         return
 
+                if policy_error:
+                    await controller.finish_step(
+                        runtime_step,
+                        success=False,
+                        error=policy_error,
+                    )
+                    message = f"工具策略校验失败：{policy_error}"
+                    controller.state.output += message
+                    await controller.emit("run.output", {"delta": message})
+                    await controller.fail(policy_error)
+                    save_message(
+                        self.session_id,
+                        role=MessageRole.assistant,
+                        content=message,
+                    )
+                    yield message
+                    return
+
                 step_success = all(
                     result.get("success", True) for result in tool_results
                 )
@@ -382,6 +442,42 @@ class AgentLoop:
                 continue
 
             else:
+                incomplete_step = self._incomplete_plan_step()
+                if incomplete_step is not None:
+                    correction_count = incomplete_plan_corrections.get(incomplete_step.id, 0) + 1
+                    incomplete_plan_corrections[incomplete_step.id] = correction_count
+                    if correction_count <= _MAX_POLICY_CORRECTIONS:
+                        messages.append({
+                            "role": "assistant",
+                            "content": response.content or "",
+                        })
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                f"计划步骤 {incomplete_step.id} 尚未完成。"
+                                f"必须完成工具 {incomplete_step.expected_tools} 后才能返回最终答复。"
+                                "请从当前提供的工具中继续执行，不要只回复文字。"
+                            ),
+                        })
+                        continue
+
+                    error = (
+                        f"步骤 {incomplete_step.id} 未完成要求的工具 "
+                        f"{incomplete_step.expected_tools}，模型提前结束执行"
+                    )
+                    self._plan.mark_failed(incomplete_step.id, error)
+                    await controller.fail(error)
+                    message = f"计划执行已停止：{error}"
+                    controller.state.output += message
+                    await controller.emit("run.output", {"delta": message})
+                    save_message(
+                        self.session_id,
+                        role=MessageRole.assistant,
+                        content=message,
+                    )
+                    yield message
+                    return
+
                 # 最终回复：流式输出
                 full_response = ""
                 try:
@@ -513,17 +609,66 @@ class AgentLoop:
         if step.status == TaskStatus.FAILED:
             return f"步骤 {step.id} 已失败，不能继续执行"
 
-        if step.expected_tools:
-            unexpected = [
-                tool_call.name for tool_call in tool_calls
-                if tool_call.name not in step.expected_tools
-            ]
-            if unexpected:
-                return (
-                    f"步骤 {step.id} 仅允许工具 {step.expected_tools}，"
-                    f"但模型请求了 {unexpected}"
-                )
+        if not step.expected_tools:
+            return f"步骤 {step.id} 未声明有效工具，无法安全执行"
+
+        allowed_tools = self._allowed_tools_for_plan_step(step)
+        unexpected = [
+            tool_call.name for tool_call in tool_calls
+            if tool_call.name not in allowed_tools
+        ]
+        if unexpected:
+            return (
+                f"步骤 {step.id} 要求工具 {step.expected_tools}，"
+                f"仅额外允许只读观察工具 {sorted(allowed_tools - set(step.expected_tools))}，"
+                f"但模型请求了 {unexpected}"
+            )
         return None
+
+    def _tools_for_current_plan_step(self, tools: list[dict]) -> list[dict]:
+        """只向模型暴露当前计划步骤可以调用的工具。"""
+        if not self._plan or not self._plan.steps:
+            return tools
+        step = self._plan.current_step
+        if step is None:
+            step = self._plan.advance_to_next()
+        if step is None:
+            return []
+        allowed_tools = self._allowed_tools_for_plan_step(step)
+        return [
+            schema for schema in tools
+            if schema["function"]["name"] in allowed_tools
+        ]
+
+    @staticmethod
+    def _allowed_tools_for_plan_step(step: TaskStep) -> set[str]:
+        """必需执行工具加无副作用观察工具；观察工具不计入步骤完成条件。"""
+        return set(step.expected_tools) | set(_PLAN_OBSERVATION_TOOLS)
+
+    def _policy_scope_key(self) -> str:
+        if self._plan and self._plan.current_step:
+            return f"plan:{self._plan.current_step.id}"
+        return "skill-agent"
+
+    @staticmethod
+    def _policy_correction_message(error: str, allowed_schemas: list[dict]) -> str:
+        allowed = [
+            schema["function"]["name"]
+            for schema in allowed_schemas
+        ]
+        return (
+            f"上一次工具调用因策略越界而未执行：{error}。"
+            f"这是一次纠正机会。只能调用当前允许的工具：{allowed}。"
+            "不要重复被拒绝的调用。"
+        )
+
+    def _incomplete_plan_step(self) -> Optional[TaskStep]:
+        if not self._plan or self._plan.is_complete:
+            return None
+        step = self._plan.current_step
+        if step and step.status in {TaskStatus.PENDING, TaskStatus.RUNNING}:
+            return step
+        return self._plan.advance_to_next()
 
     def _runtime_step_name(self, tool_calls: list) -> str:
         """为 Runtime Step 生成稳定、用户可读的名称。"""
