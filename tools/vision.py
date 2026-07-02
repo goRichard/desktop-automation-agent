@@ -585,7 +585,7 @@ async def batch_locate_elements(
         try:
             raw_targets = json.loads(targets)
         except json.JSONDecodeError:
-            return f"targets 格式错误，需要 JSON 数组字符串，如 '[\"To\",\"Cc\"]'"
+            return "targets 格式错误，需要 JSON 数组字符串，如 '[\"To\",\"Cc\"]'"
 
         if not raw_targets or not isinstance(raw_targets, list):
             return "targets 不能为空，且必须是 JSON 数组"
@@ -766,7 +766,7 @@ async def find_and_click_batch(
         try:
             target_list = json.loads(targets)
         except json.JSONDecodeError:
-            return f"targets 格式错误，需要 JSON 数组字符串，如 '[\"1\",\"2\",\"3\"]'"
+            return "targets 格式错误，需要 JSON 数组字符串，如 '[\"1\",\"2\",\"3\"]'"
 
         if not target_list or not isinstance(target_list, list):
             return "targets 不能为空，且必须是数组"
@@ -909,7 +909,8 @@ async def verify_action_result(
             f"## 预期效果\n{expected}\n\n"
             f"请用以下格式返回（根据实际观察选择一种）：\n"
             f"- ✅ 符合预期：[简要说明你看到了什么]\n"
-            f"- ⚠️ 部分符合：[说明看到了什么以及差异]"
+            f"- ⚠️ 无法确定：[说明遮挡、加载中或无法判断的原因]\n"
+            f"- ❌ 不符合预期：[说明当前可见状态与预期的明确冲突]"
         )
         result = await _visual_verify(prompt, window=target_window, screenshot_name="verify")
         return result.strip()

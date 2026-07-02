@@ -186,6 +186,11 @@ CLI 会在每次 Chat/Vision 模型响应后显示当前 Run 的累计 Token 用
 如果某个 OpenAI-compatible/Ollama 服务没有返回 `usage`，模型调用次数仍会记录，并明确
 标记未报告的调用；此时 Token 累计值可能不完整。
 
+计划动作的视觉验证只判断刚执行工具的直接效果，不再额外调用 Chat 模型生成预期。工具
+报告新窗口时截图跟随新窗口；可能发生窗口切换但没有可靠标题时保持当前前台窗口，不会
+重新激活旧窗口。验证输出包含 `[验证截图目标]` 便于排查。`⚠️ 无法确定` 作为观察提示，
+只有明确的 `❌ 不符合预期` 才会把工具结果标记为失败。
+
 `condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
 固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
 会在 `data/run_evidence` 保存错误元数据，并尽力采集截图和目标窗口 UIA 信息。
@@ -259,10 +264,11 @@ specs/          产品和架构规范
 ```powershell
 pip install -e ".[dev]"
 python -m pytest -q
-python -m ruff check agent runtime skills tasks config credentials llm tests --exclude tests/vision_bbox
+python -m ruff check agent runtime skills tasks config credentials llm memory tests tools/vision.py `
+  --exclude tests/vision_bbox
 ```
 
-当前基线包含 36 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 42 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

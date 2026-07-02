@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-36 passed
+42 passed
 ```
 
 测试覆盖：
@@ -210,6 +210,7 @@ python -m pytest -q
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
 | Skill | Schema、版本生命周期、输入、重试、嵌套 Skill、执行策略 |
+| Action Verification | 新窗口跟随、旧窗口保护、稳定等待、警告/失败语义 |
 | Task/Scheduler | Cron、时区、手动执行、旧任务迁移 |
 
 当前可能出现两个已知 warning：
@@ -217,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 36 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 42 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -227,7 +228,8 @@ python -m pytest -q 2>&1 |
 核心重构模块的静态检查：
 
 ```powershell
-python -m ruff check agent runtime skills tasks config credentials llm tests `
+python -m ruff check agent runtime skills tasks config credentials llm memory tests `
+  tools/vision.py `
   --exclude tests/vision_bbox
 ```
 
@@ -465,9 +467,14 @@ asyncio.run(main())
 | A10 | Skill `guided` 模式 | 仅风险步骤需要确认 |
 | A11 | 同时启动两个桌面 Run | 第二个 Run 等待桌面互斥锁 |
 | A12 | 暂停、恢复和取消 Run | 状态和 Event 顺序正确 |
+| A13 | 点击后弹出新窗口 | `verify_action_result` 的 `[验证截图目标]` 是新窗口标题 |
 
 邮件发送、Teams 发消息等外部副作用必须使用测试账号和测试接收人，并作为独立用例执行。
 无人值守模式只能运行已发布的固定 Skill 版本，并显式批准外部副作用。
+
+验证结果中的 `⚠️ 无法确定` 只表示截图遮挡、加载中或视觉模型无法判断，不会立即中止
+计划；`❌ 不符合预期` 才表示明确失败。对于新建邮件、打开对话框等场景，如果
+`[验证截图目标]` 仍显示旧窗口，请同时保留工具原始返回和截图用于排查。
 
 ## 10. Task/Cron 测试
 
