@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from typing import Any, Optional
 
 from .events import EventBus
@@ -170,6 +171,53 @@ class RunController:
         await self._resume_gate.wait()
         if self.state.status == RunStatus.CANCELLED:
             raise RunCancelled(self.state.error or "Run cancelled")
+
+    async def record_model_usage(self, usage: Any) -> None:
+        """Accumulate one model response and publish its Run-level usage."""
+        value = usage.to_dict() if hasattr(usage, "to_dict") else dict(usage)
+        cumulative = self.state.token_usage
+        cumulative["model_calls"] += 1
+        if value.get("reported"):
+            cumulative["reported_calls"] += 1
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+        ):
+            cumulative[key] += max(0, int(value.get(key, 0) or 0))
+
+        role = str(value.get("role") or "chat")
+        role_usage = cumulative["by_role"].setdefault(
+            role,
+            {
+                "model_calls": 0,
+                "reported_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cached_input_tokens": 0,
+            },
+        )
+        role_usage["model_calls"] += 1
+        if value.get("reported"):
+            role_usage["reported_calls"] += 1
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+        ):
+            role_usage[key] += max(0, int(value.get(key, 0) or 0))
+
+        await self._persist_run()
+        await self.emit(
+            "run.usage",
+            {
+                "increment": value,
+                "cumulative": deepcopy(cumulative),
+            },
+        )
 
     async def succeed(self) -> None:
         if not self.state.is_terminal:

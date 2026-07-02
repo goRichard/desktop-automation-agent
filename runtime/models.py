@@ -16,6 +16,18 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def empty_token_usage() -> dict[str, Any]:
+    return {
+        "model_calls": 0,
+        "reported_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cached_input_tokens": 0,
+        "by_role": {},
+    }
+
+
 class RunStatus(str, Enum):
     QUEUED = "queued"
     PREPARING = "preparing"
@@ -77,6 +89,7 @@ class RunState:
     finished_at: Optional[str] = None
     error: Optional[str] = None
     output: str = ""
+    token_usage: dict[str, Any] = field(default_factory=empty_token_usage)
     steps: list[StepRunState] = field(default_factory=list)
 
     @property

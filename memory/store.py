@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from sqlalchemy import inspect, text
 from sqlmodel import Session as DBSession
 from sqlmodel import SQLModel, create_engine, select
 
@@ -56,6 +57,7 @@ def init_db(db_path: Path | str = "./data/agent.db") -> None:
         connect_args={"check_same_thread": False},
     )
     SQLModel.metadata.create_all(_engine)
+    _apply_incremental_migrations()
     _record_schema_version()
 
 
@@ -65,7 +67,21 @@ def get_engine():
     return _engine
 
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
+
+
+def _apply_incremental_migrations() -> None:
+    """Apply small SQLite migrations needed by existing development databases."""
+    inspector = inspect(_engine)
+    context_columns = {
+        column["name"] for column in inspector.get_columns("runtime_run_contexts")
+    }
+    if "token_usage" not in context_columns:
+        with _engine.begin() as connection:
+            connection.execute(text(
+                "ALTER TABLE runtime_run_contexts "
+                "ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'"
+            ))
 
 
 def _record_schema_version() -> None:
@@ -391,6 +407,10 @@ def upsert_runtime_run(value: dict[str, Any]) -> RuntimeRun:
         context.skill_version = value.get("skill_version")
         context.execution_mode = value.get("execution_mode")
         context.inputs = json.dumps(value.get("inputs", {}), ensure_ascii=False)
+        context.token_usage = json.dumps(
+            value.get("token_usage", {}),
+            ensure_ascii=False,
+        )
         db.add(context)
         db.commit()
         db.refresh(record)

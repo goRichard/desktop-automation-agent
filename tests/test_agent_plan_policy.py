@@ -104,7 +104,8 @@ async def test_policy_violation_gets_one_correction_then_plan_continues(monkeypa
             return LLMResponse("done", [], "stop")
 
         async def chat_stream(self, messages, tools=None):
-            yield "done"
+            raise AssertionError("final response must not trigger a duplicate model request")
+            yield  # pragma: no cover
 
     async def fake_execute(tool_calls):
         return [{

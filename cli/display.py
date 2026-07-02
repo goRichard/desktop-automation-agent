@@ -95,6 +95,30 @@ def print_success(msg: str) -> None:
     console.print(f"[success]✓ {msg}[/success]")
 
 
+def print_token_usage(usage: dict[str, Any], label: str = "Token 用量") -> None:
+    """显示本次 Run 的模型调用和 Token 累计值。"""
+    calls = int(usage.get("model_calls", 0) or 0)
+    if calls == 0:
+        return
+    reported = int(usage.get("reported_calls", 0) or 0)
+    input_tokens = int(usage.get("input_tokens", 0) or 0)
+    output_tokens = int(usage.get("output_tokens", 0) or 0)
+    total_tokens = int(usage.get("total_tokens", 0) or 0)
+    cached_tokens = int(usage.get("cached_input_tokens", 0) or 0)
+    parts = [
+        f"模型调用 {calls}",
+        f"输入 {input_tokens:,}",
+        f"输出 {output_tokens:,}",
+        f"总计 {total_tokens:,} tokens",
+    ]
+    if cached_tokens:
+        parts.append(f"缓存输入 {cached_tokens:,}")
+    missing = calls - reported
+    if missing:
+        parts.append(f"{missing} 次调用未返回 usage")
+    console.print(f"[info]{label}：{' | '.join(parts)}[/info]")
+
+
 def print_separator() -> None:
     console.print("[separator]─[/separator]" * 60)
 

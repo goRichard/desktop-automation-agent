@@ -185,6 +185,7 @@ class RuntimeRunContext(SQLModel, table=True):
     skill_version: Optional[str] = None
     execution_mode: Optional[str] = None
     inputs: str = Field(default="{}", description="JSON encoded Skill inputs")
+    token_usage: str = Field(default="{}", description="JSON encoded model token usage")
 
 
 class RuntimeStepRun(SQLModel, table=True):

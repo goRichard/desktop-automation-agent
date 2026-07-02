@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-32 passed
+36 passed
 ```
 
 测试覆盖：
@@ -206,7 +206,7 @@ python -m pytest -q
 | 范围 | 测试内容 |
 |---|---|
 | Model Provider | 配置校验、密钥脱敏、CA/指纹、Ollama URL、错误脱敏 |
-| Runtime | Run/Step/Event 状态、暂停/恢复、确认、取消、桌面互斥 |
+| Runtime | Run/Step/Event 状态、暂停/恢复、确认、取消、桌面互斥、Token 累计 |
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
 | Skill | Schema、版本生命周期、输入、重试、嵌套 Skill、执行策略 |
@@ -217,7 +217,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 32 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 36 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -311,6 +311,16 @@ Invoke-RestMethod "$baseUrl/runs" -Headers $headers
 - 带 Token 时各接口返回 JSON。
 - `/runtime/environment` 的数据库和 Skill 路径指向当前配置目录。
 - `/models` 不返回 API Key 或环境变量名。
+- Run 响应包含 `token_usage`；模型调用后 Event 历史包含 `run.usage`。
+
+CLI 执行期间应在每次模型响应后看到类似输出：
+
+```text
+Token 累计：模型调用 3 | 输入 12,345 | 输出 678 | 总计 13,023 tokens
+```
+
+不同 Provider 返回的字段可能不同。如果服务没有返回 OpenAI-compatible `usage`，输出会
+标记“调用未返回 usage”，此时只能确认调用次数，Token 数量可能不完整。
 
 配置级模型健康检查不发起真实推理：
 

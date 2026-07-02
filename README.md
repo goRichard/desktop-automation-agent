@@ -181,6 +181,11 @@ GET  /tasks/{id}/executions
 计划动作。策略越界调用不会执行，模型有一次改正机会；再次越界或已授权工具实际执行失败
 时，计划才会停止。
 
+CLI 会在每次 Chat/Vision 模型响应后显示当前 Run 的累计 Token 用量。`GET /runs/{id}`
+返回 `token_usage`，WebSocket 和 Run Event 历史通过 `run.usage` 推送单次增量及累计值。
+如果某个 OpenAI-compatible/Ollama 服务没有返回 `usage`，模型调用次数仍会记录，并明确
+标记未报告的调用；此时 Token 累计值可能不完整。
+
 `condition` 步骤支持 `equals`、`contains`、真假和数值比较；`skill.call` 必须声明子 Skill
 固定版本，并继承父 Run 的执行模式、确认策略和桌面锁。自动化步骤最终失败后，Runtime
 会在 `data/run_evidence` 保存错误元数据，并尽力采集截图和目标窗口 UIA 信息。
@@ -257,7 +262,7 @@ python -m pytest -q
 python -m ruff check agent runtime skills tasks config credentials llm tests --exclude tests/vision_bbox
 ```
 
-当前基线包含 32 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 36 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

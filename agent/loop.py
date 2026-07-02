@@ -10,7 +10,7 @@ import json
 from typing import Any, AsyncGenerator, Optional
 
 from config import get_settings
-from llm import get_llm_client
+from llm import TokenUsage, capture_token_usage, get_llm_client
 from memory import (
     MessageRole,
     create_session,
@@ -71,6 +71,7 @@ class AgentLoop:
 
         self._turn_count = 0
         self._plan: Optional[TaskPlan] = None  # P1-3: 计划状态追踪
+        self._pending_token_usage: list[TokenUsage] = []
         self.event_bus = event_bus or EventBus()
         self.current_run: Optional[RunController] = None
 
@@ -107,7 +108,8 @@ class AgentLoop:
             {"role": "user", "content": prompt},
         ]
 
-        response = await self.llm.chat(messages)
+        with capture_token_usage(self._pending_token_usage.append):
+            response = await self.llm.chat(messages)
         return (response.content or "").strip()
 
     async def run(
@@ -165,6 +167,10 @@ class AgentLoop:
             raise ValueError("RunController session does not match AgentLoop session")
         self.current_run = controller
         await controller.initialize()
+        pending_usage = self._pending_token_usage
+        self._pending_token_usage = []
+        for usage in pending_usage:
+            await controller.record_model_usage(usage)
 
         try:
             async with desktop_execution_lock.hold(controller):
@@ -173,15 +179,16 @@ class AgentLoop:
                 await controller.checkpoint()
                 await controller.transition(RunStatus.RUNNING)
                 await controller.checkpoint()
-                async for token in self._execute_stream(
-                    user_input=user_input,
-                    on_tool_call=on_tool_call,
-                    on_tool_result=on_tool_result,
-                    confirmed_plan=confirmed_plan,
-                    on_token=on_token,
-                    controller=controller,
-                ):
-                    yield token
+                with capture_token_usage(controller.record_model_usage):
+                    async for token in self._execute_stream(
+                        user_input=user_input,
+                        on_tool_call=on_tool_call,
+                        on_tool_result=on_tool_result,
+                        confirmed_plan=confirmed_plan,
+                        on_token=on_token,
+                        controller=controller,
+                    ):
+                        yield token
         except RunCancelled as error:
             message = f"执行已取消：{error}"
             controller.state.output += message
@@ -478,33 +485,16 @@ class AgentLoop:
                     yield message
                     return
 
-                # 最终回复：流式输出
-                full_response = ""
-                try:
-                    async for token in self.llm.chat_stream(messages):
-                        await controller.checkpoint()
-                        full_response += token
-                        controller.state.output += token
-                        await controller.emit("run.output", {"delta": token})
-                        if on_token:
-                            await _maybe_await(on_token(token))
-                        yield token
-                except Exception as e:
-                    if _is_context_overflow(e):
-                        overflow_message = _context_overflow_msg()
-                        controller.state.output += f"\n{overflow_message}"
-                        await controller.emit(
-                            "run.output", {"delta": f"\n{overflow_message}"}
-                        )
-                        await controller.fail(overflow_message)
-                        yield f"\n{overflow_message}"
-                        save_message(
-                            self.session_id,
-                            role=MessageRole.assistant,
-                            content=full_response or _context_overflow_msg(),
-                        )
-                        return
-                    raise
+                # 已通过上面的非流式请求获得最终内容。直接输出该响应，
+                # 避免为了“流式展示”再次请求模型并重复消耗 Token。
+                full_response = response.content or ""
+                await controller.checkpoint()
+                controller.state.output += full_response
+                await controller.emit("run.output", {"delta": full_response})
+                if on_token:
+                    await _maybe_await(on_token(full_response))
+                if full_response:
+                    yield full_response
 
                 save_message(
                     self.session_id,
@@ -530,13 +520,14 @@ class AgentLoop:
         """Execute one Agent-backed Skill step inside an existing controlled Run."""
         self.current_run = controller
         output = ""
-        async for token in self._execute_stream(
-            user_input=instruction,
-            controller=controller,
-            allowed_tool_names=allowed_tool_names,
-            finalize_run=False,
-        ):
-            output += token
+        with capture_token_usage(controller.record_model_usage):
+            async for token in self._execute_stream(
+                user_input=instruction,
+                controller=controller,
+                allowed_tool_names=allowed_tool_names,
+                finalize_run=False,
+            ):
+                output += token
         if controller.state.status == RunStatus.FAILED:
             raise RuntimeError(controller.state.error or "Agent Skill step failed")
         return output

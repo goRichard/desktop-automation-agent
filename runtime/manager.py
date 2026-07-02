@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from .controller import RunController
 from .events import EventBus
+from .models import empty_token_usage
 from .persistence import RuntimePersistence, get_runtime_persistence
 
 
@@ -169,6 +170,8 @@ class RuntimeManager:
         unattended_approved: bool,
         timeout_seconds: Optional[int],
     ) -> None:
+        from llm import capture_token_usage
+
         from .controller import RunCancelled
         from .models import RunStatus
 
@@ -176,16 +179,17 @@ class RuntimeManager:
             await controller.initialize()
             await controller.transition(RunStatus.PREPARING)
             await controller.transition(RunStatus.RUNNING)
-            result = await asyncio.wait_for(
-                executor.execute(
-                    document,
-                    inputs,
-                    controller=controller,
-                    mode=mode,
-                    unattended_approved=unattended_approved,
-                ),
-                timeout=timeout_seconds or document.execution.timeout_seconds,
-            )
+            with capture_token_usage(controller.record_model_usage):
+                result = await asyncio.wait_for(
+                    executor.execute(
+                        document,
+                        inputs,
+                        controller=controller,
+                        mode=mode,
+                        unattended_approved=unattended_approved,
+                    ),
+                    timeout=timeout_seconds or document.execution.timeout_seconds,
+                )
             summary = (
                 f"Skill {document.metadata.id}@{document.metadata.version} completed "
                 f"with {len(result['steps'])} steps"
@@ -351,6 +355,7 @@ class RuntimeManager:
 
     @staticmethod
     def _context_record_to_dict(record: Any) -> dict[str, Any]:
-        value = record.model_dump(exclude={"run_id", "inputs"})
+        value = record.model_dump(exclude={"run_id", "inputs", "token_usage"})
         value["inputs"] = json.loads(record.inputs)
+        value["token_usage"] = json.loads(record.token_usage) or empty_token_usage()
         return value

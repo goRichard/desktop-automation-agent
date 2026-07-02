@@ -103,6 +103,15 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
     loop = AgentLoop(session_id=session_id)
     display.print_info(f"会话 ID: {loop.session_id[:8]}...")
 
+    def _show_usage(event) -> None:
+        if event.type == "run.usage":
+            display.print_token_usage(
+                event.data["cumulative"],
+                label="Token 累计",
+            )
+
+    unsubscribe_usage = loop.event_bus.subscribe(_show_usage)
+
     # 历史记录文件
     history_dir = Path("./.agent_history")
     history_dir.mkdir(exist_ok=True)
@@ -213,6 +222,7 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
         display.print_separator()
 
     # 关闭调度器
+    unsubscribe_usage()
     from scheduler import shutdown_scheduler
     shutdown_scheduler()
 

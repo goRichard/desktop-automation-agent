@@ -10,6 +10,7 @@ from runtime import (
     StepStatus,
     desktop_execution_lock,
 )
+from llm import TokenUsage
 
 
 def test_run_state_and_event_sequence() -> None:
@@ -162,5 +163,42 @@ def test_confirmation_requires_explicit_resolution() -> None:
         assert await request is True
         assert run.state.status == RunStatus.RUNNING
         assert run.state.pending_confirmation is None
+
+    asyncio.run(check())
+
+
+def test_model_usage_is_accumulated_and_emitted() -> None:
+    async def check() -> None:
+        run = RunController("session", "demo", run_id="run-usage")
+        await run.initialize()
+        await run.record_model_usage(TokenUsage(
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+            cached_input_tokens=25,
+            reported=True,
+            role="chat",
+            model="model-a",
+        ))
+        await run.record_model_usage(TokenUsage(
+            reported=False,
+            role="vision",
+            model="model-b",
+        ))
+
+        usage = run.state.token_usage
+        assert usage["model_calls"] == 2
+        assert usage["reported_calls"] == 1
+        assert usage["total_tokens"] == 120
+        assert usage["cached_input_tokens"] == 25
+        assert usage["by_role"]["chat"]["input_tokens"] == 100
+        assert usage["by_role"]["vision"]["model_calls"] == 1
+        usage_events = [
+            event for event in run.events.history(run.state.id)
+            if event.type == "run.usage"
+        ]
+        assert len(usage_events) == 2
+        assert usage_events[0].data["cumulative"]["model_calls"] == 1
+        assert usage_events[1].data["cumulative"]["model_calls"] == 2
 
     asyncio.run(check())

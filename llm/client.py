@@ -16,6 +16,7 @@ from config import get_settings
 from config.model_provider import ModelRole, ProviderType
 
 from .providers import ModelProvider, create_provider
+from .usage import TokenUsage, report_token_usage
 
 
 class ToolCall:
@@ -33,10 +34,17 @@ class ToolCall:
 class LLMResponse:
     """统一的 LLM 响应对象"""
 
-    def __init__(self, content: Optional[str], tool_calls: list[ToolCall], finish_reason: str):
+    def __init__(
+        self,
+        content: Optional[str],
+        tool_calls: list[ToolCall],
+        finish_reason: str,
+        usage: Optional[TokenUsage] = None,
+    ):
         self.content = content
         self.tool_calls = tool_calls
         self.finish_reason = finish_reason
+        self.usage = usage or TokenUsage()
 
     @property
     def has_tool_calls(self) -> bool:
@@ -96,7 +104,9 @@ class LLMClient:
             kwargs["tool_choice"] = "auto"
 
         response: ChatCompletion = await self.chat_provider.complete(**kwargs)
-        return self._parse_response(response)
+        parsed = self._parse_response(response)
+        await report_token_usage(parsed.usage)
+        return parsed
 
     async def chat_stream(
         self,
@@ -124,12 +134,21 @@ class LLMClient:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        stream_usage: Optional[TokenUsage] = None
         async for chunk in self.chat_provider.stream(**kwargs):
+            if getattr(chunk, "usage", None) is not None:
+                stream_usage = TokenUsage.from_sdk(
+                    chunk.usage,
+                    role=ModelRole.CHAT.value,
+                    model=cfg.model,
+                )
             if not chunk.choices:  # Azure 最后一个 chunk 可能 choices 为空
                 continue
             delta = chunk.choices[0].delta
             if delta.content:
                 yield delta.content
+        if stream_usage is not None:
+            await report_token_usage(stream_usage)
 
     async def vision(self, image_path: str, prompt: str) -> str:
         """调用视觉模型分析图像"""
@@ -163,6 +182,11 @@ class LLMClient:
                 }
             ],
         )
+        await report_token_usage(TokenUsage.from_sdk(
+            response.usage,
+            role=ModelRole.VISION.value,
+            model=cfg.model,
+        ))
         return response.choices[0].message.content or ""
 
     def _require_vision(self) -> None:
@@ -213,6 +237,11 @@ class LLMClient:
             content=message.content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
+            usage=TokenUsage.from_sdk(
+                response.usage,
+                role=ModelRole.CHAT.value,
+                model=self.chat_provider.config.model,
+            ),
         )
 
     @staticmethod
