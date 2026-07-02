@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-51 passed
+57 passed
 ```
 
 测试覆盖：
@@ -209,7 +209,7 @@ python -m pytest -q
 | Runtime | Run/Step/Event 状态、暂停/恢复、确认、取消、桌面互斥、Token 累计 |
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
-| Skill | Schema、版本生命周期、输入、快捷键批处理、嵌套 Skill、执行策略 |
+| Skill | Schema、版本生命周期、输入、快捷键批处理、Outlook Adapter、嵌套 Skill、执行策略 |
 | Action Verification | 分层检查点、新窗口跟随、执行记忆、警告/失败语义 |
 | Task/Scheduler | Cron、时区、手动执行、旧任务迁移 |
 
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 51 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 57 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -229,7 +229,7 @@ python -m pytest -q 2>&1 |
 
 ```powershell
 python -m ruff check agent runtime skills tasks config credentials llm memory tests `
-  tools/vision.py `
+  tools/actions.py tools/outlook.py tools/vision.py `
   --exclude tests/vision_bbox
 ```
 
@@ -408,6 +408,99 @@ python -m winpeekaboo list elements --window "<Outlook 主窗口标题>" --json
 
 首轮测试不要发送真实邮件。后续邮件流程使用专用测试邮箱，先测试“新建并填写草稿但不发送”，
 确认收件人、主题、正文和窗口切换无误后，再单独审批发送测试。
+
+### W03b：Classic Outlook 确定性 Skill
+
+Runtime 启动时会从 `skills\user_skills\send_outlook_email.skill.yaml` 导入
+`send-email@2.0.0`。常规执行路径依次调用 Outlook Adapter，不经过 Agent Loop：
+
+```text
+launch -> ensureMailView -> openCompose -> resolveCompose -> fillMessage
+       -> addAttachments -> user.confirm -> send
+```
+
+先确认 Skill 已导入，然后将 draft 验证为 validated。此时可以执行 guided 测试，但暂时
+不要 publish：
+
+```powershell
+Invoke-RestMethod "$baseUrl/skills/send-email" -Headers $headers
+
+Invoke-RestMethod `
+  "$baseUrl/skills/send-email/versions/2.0.0/validate" `
+  -Method Post -Headers $headers
+```
+
+使用测试地址创建 Run：
+
+```powershell
+$runBody = @{
+  skillId = "send-email"
+  skillVersion = "2.0.0"
+  mode = "guided"
+  inputs = @{
+    recipient = "your-test-mailbox@example.com"
+    subject = "FlowPilot Classic Outlook adapter test"
+    body = "This draft was filled by the deterministic Outlook adapter."
+    attachments = @()
+  }
+} | ConvertTo-Json -Depth 6
+
+$run = Invoke-RestMethod "$baseUrl/runs" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $runBody
+
+do {
+  Start-Sleep -Seconds 1
+  $state = Invoke-RestMethod "$baseUrl/runs/$($run.id)" -Headers $headers
+} while ($state.status -in @("queued", "preparing", "running"))
+
+$state | ConvertTo-Json -Depth 8
+```
+
+此时预期状态为 `waiting_user`，Outlook 写信窗口中的收件人、主题和正文已经填写，但邮件
+尚未发送。先检查：
+
+- `token_usage.model_calls` 为 `0`，表示常规 Adapter 路径没有调用模型。
+- `execution_memory` 中依次出现 `outlook_launch_classic`、
+  `outlook_ensure_mail_view`、`outlook_open_compose`、`outlook_resolve_compose`、
+  `outlook_fill_message` 和 `outlook_add_attachments`。
+- 收件人、主题、正文准确，光标和窗口没有发生重复跳转。
+
+不发送邮件时取消 Run：
+
+```powershell
+$cancelBody = @{ reason = "Draft-only smoke test completed" } | ConvertTo-Json
+Invoke-RestMethod "$baseUrl/runs/$($run.id)/cancel" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $cancelBody
+```
+
+发送验收必须改用专用测试邮箱，重新创建 Run，并在 `waiting_user` 后显式批准：
+
+```powershell
+$run = Invoke-RestMethod "$baseUrl/runs" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $runBody
+
+do {
+  Start-Sleep -Seconds 1
+  $state = Invoke-RestMethod "$baseUrl/runs/$($run.id)" -Headers $headers
+} while ($state.status -in @("queued", "preparing", "running"))
+
+$confirmBody = @{ approved = $true } | ConvertTo-Json
+Invoke-RestMethod "$baseUrl/runs/$($run.id)/confirm" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $confirmBody
+```
+
+批准后 Adapter 使用 `Alt+S`，并以写信窗口关闭作为成功条件。发送步骤没有 Agent
+fallback：如果发送结果不明确，Run 会失败并保留证据，不会由模型再次点击 Send。
+Windows 实机验证通过后，才发布该版本：
+
+```powershell
+Invoke-RestMethod `
+  "$baseUrl/skills/send-email/versions/2.0.0/publish" `
+  -Method Post -Headers $headers
+```
+
+如果 Adapter 进入 fallback，`token_usage.model_calls` 会大于 0。请保留 Run、Event、
+Evidence 和 W03 的 UIA 输出，用于补充不同 Outlook 版本或语言下的控件别名。
 
 ### W04：New Teams 识别
 

@@ -92,19 +92,179 @@ def test_schema_and_legacy_markdown_compatibility(tmp_path: Path) -> None:
     assert repository.get("daily-report")["versions"][0]["sourceFormat"] == "markdown"
 
 
-def test_outlook_skill_prefers_bounded_keyboard_shortcuts() -> None:
+def test_outlook_skill_is_structured_and_bounded() -> None:
     skill_path = (
         Path(__file__).parents[1]
         / "skills"
         / "user_skills"
-        / "send_outlook_email"
-        / "SKILL.md"
+        / "send_outlook_email.skill.yaml"
     )
-    content = skill_path.read_text(encoding="utf-8")
-    assert "Ctrl+N" in content
-    assert "Alt+S" in content
-    assert "run_actions" in content
-    assert "必须完成用户确认" in content
+    parsed = parse_skill_file(skill_path)
+
+    assert parsed is not None
+    assert parsed.document is not None
+    document = parsed.document
+    assert document.metadata.id == "send-email"
+    assert document.metadata.version == "2.0.0"
+    assert [step.action for step in document.execution.steps] == [
+        "outlook.launch",
+        "outlook.ensureMailView",
+        "outlook.openCompose",
+        "outlook.resolveCompose",
+        "outlook.fillMessage",
+        "outlook.addAttachments",
+        "user.confirm",
+        "outlook.send",
+    ]
+    assert document.execution.steps[2].fallback.allowed_tools == [
+        "ui.inspect",
+        "ui.click",
+        "ui.hotkey",
+        "ui.wait",
+    ]
+    assert document.execution.steps[-1].fallback is None
+    assert document.execution.steps[-1].risk == "external_side_effect"
+
+
+@pytest.mark.asyncio
+async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None:
+    skill_path = (
+        Path(__file__).parents[1]
+        / "skills"
+        / "user_skills"
+        / "send_outlook_email.skill.yaml"
+    )
+    document = SkillDocument.from_yaml(skill_path.read_text(encoding="utf-8"))
+    calls: list[tuple[str, dict]] = []
+
+    outputs = {
+        "outlook_launch_classic": {
+            "ok": True,
+            "data": {"windowTitle": "Inbox - Outlook"},
+            "error": None,
+        },
+        "outlook_open_compose": {
+            "ok": True,
+            "data": {"windowTitle": "Untitled - Message (HTML)"},
+            "error": None,
+        },
+        "outlook_resolve_compose": {
+            "ok": True,
+            "data": {"windowTitle": "Untitled - Message (HTML)"},
+            "error": None,
+        },
+    }
+
+    def fake_get_tool(name: str):
+        async def invoke(**parameters):
+            calls.append((name, parameters))
+            return outputs.get(name, {"ok": True, "data": {}, "error": None})
+
+        return invoke
+
+    async def reject_agent(*_):
+        raise AssertionError("Deterministic Outlook path must not call the Agent")
+
+    async def confirm(_):
+        return True
+
+    monkeypatch.setattr("skills.executor.get_tool", fake_get_tool)
+    result = await SkillExecutor(
+        agent_runner=reject_agent,
+        confirmation_runner=confirm,
+    ).execute(
+        document,
+        {
+            "recipient": "person@example.com",
+            "subject": "Status",
+            "body": "Hello",
+        },
+    )
+
+    assert result["success"] is True
+    assert [name for name, _ in calls] == [
+        "outlook_launch_classic",
+        "outlook_ensure_mail_view",
+        "outlook_open_compose",
+        "outlook_resolve_compose",
+        "outlook_fill_message",
+        "outlook_add_attachments",
+        "outlook_send_message",
+    ]
+    assert calls[1][1]["window"] == "Inbox - Outlook"
+    assert calls[3][1] == {}
+    assert calls[4][1] == {
+        "window": "Untitled - Message (HTML)",
+        "recipient": "person@example.com",
+        "cc": "",
+        "subject": "Status",
+        "body": "Hello",
+    }
+    assert calls[5][1]["paths"] == []
+    assert calls[-1][1]["window"] == "Untitled - Message (HTML)"
+
+
+@pytest.mark.asyncio
+async def test_outlook_skill_recovers_open_compose_then_returns_to_adapter(
+    monkeypatch,
+) -> None:
+    skill_path = (
+        Path(__file__).parents[1]
+        / "skills"
+        / "user_skills"
+        / "send_outlook_email.skill.yaml"
+    )
+    document = SkillDocument.from_yaml(skill_path.read_text(encoding="utf-8"))
+    calls: list[str] = []
+    fallback_calls = []
+
+    outputs = {
+        "outlook_launch_classic": {
+            "ok": True,
+            "data": {"windowTitle": "Inbox - Outlook"},
+            "error": None,
+        },
+        "outlook_resolve_compose": {
+            "ok": True,
+            "data": {"windowTitle": "Recovered - Message (HTML)"},
+            "error": None,
+        },
+    }
+
+    def fake_get_tool(name: str):
+        async def invoke(**_):
+            calls.append(name)
+            if name == "outlook_open_compose":
+                raise RuntimeError("shortcut did not create a window")
+            return outputs.get(name, {"ok": True, "data": {}, "error": None})
+
+        return invoke
+
+    async def recover(instruction, allowed_tools):
+        fallback_calls.append((instruction, allowed_tools))
+        return "compose window opened and activated"
+
+    async def confirm(_):
+        return True
+
+    monkeypatch.setattr("skills.executor.get_tool", fake_get_tool)
+    result = await SkillExecutor(
+        agent_runner=recover,
+        confirmation_runner=confirm,
+    ).execute(
+        document,
+        {
+            "recipient": "person@example.com",
+            "subject": "Status",
+            "body": "Hello",
+        },
+    )
+
+    assert result["success"] is True
+    assert result["steps"][2]["fallback"] is True
+    assert fallback_calls[0][1] == ["ui.inspect", "ui.click", "ui.hotkey", "ui.wait"]
+    assert "outlook_resolve_compose" in calls
+    assert calls[-1] == "outlook_send_message"
 
 
 @pytest.mark.asyncio

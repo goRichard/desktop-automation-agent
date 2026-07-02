@@ -1,0 +1,164 @@
+apiVersion: desktop-agent/v1alpha1
+kind: Skill
+
+metadata:
+  id: send-email
+  name: send_email
+  version: 2.0.0
+  status: draft
+  description: 使用 Classic Outlook 确定性地填写并发送电子邮件
+  tags: [outlook, email, windows]
+  triggers:
+    - 发送邮件
+    - 发邮件
+    - 写邮件
+    - send email
+    - outlook 邮件
+    - email
+
+applications:
+  - id: outlook-classic
+    process: outlook.exe
+    required: true
+
+inputs:
+  recipient:
+    type: string
+    description: 收件人地址；多个地址使用分号分隔
+    required: true
+  subject:
+    type: string
+    description: 邮件主题
+    required: true
+  body:
+    type: string
+    description: 邮件正文
+    required: true
+  cc:
+    type: string
+    description: 抄送地址；多个地址使用分号分隔
+    required: false
+    default: ""
+  attachments:
+    type: array
+    items: string
+    description: 附件绝对路径列表
+    required: false
+    default: []
+
+execution:
+  defaultMode: guided
+  timeoutSeconds: 300
+  steps:
+    - id: launch-outlook
+      name: 启动 Classic Outlook
+      action: outlook.launch
+      retry:
+        maxAttempts: 2
+        delaySeconds: 2
+      onFailure: stop
+
+    - id: ensure-mail-view
+      name: 切换到 Outlook 邮件视图
+      action: outlook.ensureMailView
+      target:
+        window: "{{ steps.launch-outlook.output.data.windowTitle }}"
+      retry:
+        maxAttempts: 2
+        delaySeconds: 1
+      onFailure: stop
+
+    - id: open-compose
+      name: 使用 Ctrl+N 打开写信窗口
+      action: outlook.openCompose
+      target:
+        window: "{{ steps.launch-outlook.output.data.windowTitle }}"
+      with:
+        timeout_seconds: 8
+      retry:
+        maxAttempts: 2
+        delaySeconds: 1
+      fallback:
+        type: agent
+        instruction: 使用 UIA 找到 New Email 并打开新的 Classic Outlook 写信窗口。
+        allowedTools:
+          - ui.inspect
+          - ui.click
+          - ui.hotkey
+          - ui.wait
+      onFailure: stop
+
+    - id: resolve-compose
+      name: 解析当前 Outlook 写信窗口
+      action: outlook.resolveCompose
+      retry:
+        maxAttempts: 3
+        delaySeconds: 1
+      onFailure: stop
+
+    - id: fill-message
+      name: 一次性填写收件人、抄送、主题和正文
+      action: outlook.fillMessage
+      target:
+        window: "{{ steps.resolve-compose.output.data.windowTitle }}"
+      with:
+        recipient: "{{ input.recipient }}"
+        cc: "{{ input.cc }}"
+        subject: "{{ input.subject }}"
+        body: "{{ input.body }}"
+      retry:
+        maxAttempts: 2
+        delaySeconds: 1
+      fallback:
+        type: agent
+        instruction: >-
+          使用一次 UIA 扫描定位 Outlook 写信窗口中的 To、Cc、Subject 和 Body，
+          然后用 ui.actions 批量填写。不要发送邮件。
+        allowedTools:
+          - ui.inspect
+          - ui.locate
+          - ui.click
+          - ui.type
+          - ui.key
+          - ui.hotkey
+          - ui.actions
+      onFailure: stop
+
+    - id: add-attachments
+      name: 添加可选附件
+      action: outlook.addAttachments
+      target:
+        window: "{{ steps.resolve-compose.output.data.windowTitle }}"
+      with:
+        paths: "{{ input.attachments }}"
+        timeout_seconds: 8
+      fallback:
+        type: agent
+        instruction: >-
+          仅当附件列表非空时，通过 Outlook Attach File 界面逐个添加已经验证存在的附件。
+          不得使用 PowerShell、COM 或后台脚本。
+        allowedTools:
+          - ui.inspect
+          - ui.click
+          - ui.type
+          - ui.key
+          - ui.hotkey
+          - ui.wait
+      onFailure: stop
+
+    - id: confirm-send
+      name: 确认发送邮件
+      action: user.confirm
+      risk: external_side_effect
+      policy:
+        skipWhen: unattendedApproved
+
+    - id: send-message
+      name: 使用 Alt+S 发送邮件
+      action: outlook.send
+      target:
+        window: "{{ steps.resolve-compose.output.data.windowTitle }}"
+      with:
+        timeout_seconds: 8
+      risk: external_side_effect
+      onFailure: stop

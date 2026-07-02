@@ -1,7 +1,4 @@
-"""
-SKILL.md 解析器：将 Markdown 格式的技能文件解析为 SkillDefinition 对象
-SKILL.md 格式：YAML frontmatter + Markdown 正文
-"""
+"""解析版本化 YAML Skill 和兼容的 Markdown Skill。"""
 from __future__ import annotations
 
 import re
@@ -53,10 +50,8 @@ class SkillDefinition:
 
 def parse_skill_file(path: Path) -> Optional[SkillDefinition]:
     """
-    解析 SKILL.md 文件，返回 SkillDefinition。
-    支持两种格式：
-    1. YAML frontmatter（---）+ Markdown 正文
-    2. 纯 Markdown（从一级标题推断信息）
+    解析 Skill 文件，返回 SkillDefinition。
+    支持版本化 YAML、YAML frontmatter + Markdown 和纯 Markdown。
     """
     try:
         raw = path.read_text(encoding="utf-8", errors="replace")

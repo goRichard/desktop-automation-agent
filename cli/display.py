@@ -172,7 +172,10 @@ def print_sessions_table(sessions: list) -> None:
 def print_skills_table(skills: list) -> None:
     """打印技能列表"""
     if not skills:
-        print_info("暂无已加载的技能，请在 skills/user_skills/ 目录中添加 SKILL.md 文件")
+        print_info(
+            "暂无已加载的技能，请在 skills/user_skills/ 目录中添加 "
+            "*.skill.yaml 或 SKILL.md 文件"
+        )
         return
 
     table = Table(title="已加载技能", border_style="green")

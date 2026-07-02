@@ -3,7 +3,7 @@
 """
 # 导入所有工具模块（顺序触发 @tool 装饰器注册到 registry）
 # scheduler_tool 延迟导入，避免循环依赖（scheduler_tool -> scheduler.engine -> memory）
-from . import actions, browser, planner, system, vision, winpeekaboo  # noqa: F401
+from . import actions, browser, outlook, planner, system, vision, winpeekaboo  # noqa: F401
 from .registry import get_all_schemas, get_tool, get_tool_description, list_tools, tool
 
 __all__ = [

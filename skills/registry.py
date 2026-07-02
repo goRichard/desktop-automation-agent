@@ -1,7 +1,4 @@
-"""
-Skills 注册与加载：扫描 user_skills 目录，加载所有 SKILL.md
-提供 Skills 摘要注入 System Prompt
-"""
+"""扫描并注册版本化 YAML Skill 和兼容的 Markdown Skill。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +13,7 @@ _skills: dict[str, SkillDefinition] = {}
 
 def load_skills(skills_dir: Optional[Path] = None) -> int:
     """
-    扫描 skills_dir 目录，加载所有 SKILL.md 文件。
+    扫描 skills_dir 目录，加载 YAML 和 Markdown Skill 文件。
     返回加载成功的数量。
     """
     global _skills
@@ -31,14 +28,14 @@ def load_skills(skills_dir: Optional[Path] = None) -> int:
         return 0
 
     count = 0
-    # 同时搜索 *.skill.md 和 SKILL.md（大小写不敏感）
+    # 同时搜索版本化 YAML 和兼容的 Markdown。
     patterns = ["*.skill.md", "*.md", "SKILL.md", "*.yaml", "*.yml"]
     found_files: set[Path] = set()
 
     for pattern in patterns:
         found_files.update(skills_dir.rglob(pattern))
 
-    # 也搜索子目录中的 SKILL.md
+    # 兼容历史子目录布局。
     for subdir in skills_dir.iterdir():
         if subdir.is_dir():
             skill_file = subdir / "SKILL.md"
