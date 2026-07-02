@@ -83,6 +83,7 @@ profiles:
 
 agent:
   max_iterations: 100
+  max_history_messages: 40
   skills_dir: ./skills/user_skills
   memory_db: ./data/agent.db
   evidence_dir: ./data/run_evidence

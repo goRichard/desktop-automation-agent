@@ -16,6 +16,41 @@ from memory import (
 from skills.registry import find_matching_skill_async, get_skills_summary
 from .planner import TaskPlan
 
+
+def _trim_history(
+    messages: list[dict[str, Any]],
+    max_rounds: int,
+) -> list[dict[str, Any]]:
+    """
+    裁剪旧对话轮次以控制上下文长度。
+    保留 system prompt + 最近 max_rounds 轮用户对话，
+    同时确保 tool_call / tool_result 配对不被割裂。
+    """
+    if len(messages) <= 1 or max_rounds < 1:
+        return messages
+
+    # 找到所有 user 消息的索引位置
+    user_indices = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+
+    if len(user_indices) <= max_rounds:
+        return messages
+
+    # 保留 system 消息 + 最后 max_rounds 个 user 组
+    keep_start = user_indices[-max_rounds]
+    trimmed_count = len(user_indices) - max_rounds
+
+    trimmed = messages[:1]  # system prompt
+    trimmed.append({
+        "role": "system",
+        "content": (
+            f"[上下文已压缩] 省略了 {trimmed_count} 轮较早的对话历史，"
+            f"当前保留最近 {max_rounds} 轮对话。"
+        ),
+    })
+    trimmed.extend(messages[keep_start:])
+    return trimmed
+
+
 _PLAN_FIRST_CONSTRAINT = (
     "## ⚠️ 最高优先级执行规则（覆盖所有其他规则）\n\n"
     "**以下规则优先级最高，当与其他规则冲突时，以本规则为准：**\n\n"
@@ -73,7 +108,9 @@ def assemble_with_confirmed_plan(
         messages.extend(messages_to_openai_format(history))
 
     messages.append({"role": "user", "content": user_input})
-    return messages
+
+    # 裁剪旧历史，防止上下文溢出
+    return _trim_history(messages, settings.max_history_messages)
 
 
 async def assemble(
@@ -124,7 +161,8 @@ async def assemble(
     # ── 3. 当前用户输入 ───────────────────────────────
     messages.append({"role": "user", "content": user_input})
 
-    return messages
+    # 裁剪旧历史，防止上下文溢出
+    return _trim_history(messages, get_settings().max_history_messages)
 
 
 # ══════════════════════════════════════════════════════

@@ -168,6 +168,19 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
                     )
                     answer = answer.strip()
 
+                    # ── 斜杠命令优先：/exit 退出、/cancel 取消计划 ──
+                    if answer.startswith("/"):
+                        cmd = answer.split(maxsplit=1)[0].lower()
+                        if cmd in ("/exit", "/quit", "/q"):
+                            return  # 直接退出 _chat_loop
+                        if cmd == "/cancel":
+                            display.print_info("计划已取消")
+                            confirmed_plan = None
+                            plan_cancelled = True
+                            break
+                        # 其他斜杠命令在确认流程中视为修改意见
+                        display.print_info(f"命令 {cmd} 在确认流程中不适用，将视为修改意见")
+
                     if answer.lower() in ("n", "no", "取消", "cancel"):
                         display.print_info("已取消")
                         confirmed_plan = None
@@ -252,6 +265,9 @@ async def _handle_builtin_command(cmd: str, loop) -> Optional[str]:
 
     if command in ("/exit", "/quit", "/q"):
         return "exit"
+
+    elif command == "/cancel":
+        display.print_info("当前无正在执行的计划或操作")
 
     elif command == "/help":
         display.print_help()

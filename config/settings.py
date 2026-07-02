@@ -174,6 +174,10 @@ class Settings(BaseSettings):
         return self.agent.get("max_iterations", 100)
 
     @property
+    def max_history_messages(self) -> int:
+        return self.agent.get("max_history_messages", 40)
+
+    @property
     def skills_dir(self) -> Path:
         return self._resolve_data_path(self.agent.get("skills_dir", "./skills/user_skills"))
 

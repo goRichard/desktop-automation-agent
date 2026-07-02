@@ -140,6 +140,7 @@ def print_help() -> None:
         ("/tools", "列出所有可用工具"),
         ("/config", "显示当前配置信息"),
         ("/clear", "清空终端屏幕"),
+        ("/cancel", "取消当前计划/操作（在计划确认中可用）"),
         ("/exit 或 /quit", "退出程序"),
     ]
     for cmd, desc in commands:
