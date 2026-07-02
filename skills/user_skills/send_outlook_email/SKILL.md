@@ -105,6 +105,16 @@ triggers:
 analyze_screen(prompt="Outlook 当前是否回到了收件箱/主窗口？新邮件窗口是否已关闭？只回答是或否。")
 ```
 
+## NOTE:
+
+- **组合键必须使用 `hotkey(keys="...")`**，禁止用 `press_key()` 发送组合键。
+- `press_key()` 仅允许用于单键：`Enter/Tab/Escape/Up/Down/Left/Right/Delete/BackSpace/F1-F12` 等。
+- 示例：
+  - 新建邮件：`hotkey(keys="Ctrl+N", window="<Outlook主窗口>")`
+  - 发送邮件：`hotkey(keys="Alt+S", window="<邮件编辑窗口>")`（或 `hotkey(keys="Ctrl+Enter")`，按你们环境习惯二选一）
+
+
+
 **验证逻辑：**
 
 ```
