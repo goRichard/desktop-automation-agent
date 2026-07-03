@@ -903,21 +903,33 @@ _WINDOW_TRANSITION_TOOLS = {
 
 
 def _verification_target_window(tool_calls: list, tool_results: list[dict]) -> Optional[str]:
-    """Prefer a newly reported window; never reactivate a stale window after transitions."""
+    """Use only the latest transition result; never reactivate a stale window."""
     import re
 
     patterns = (
         r"window_title:\s*([^\r\n]+)",
         r"检测到新窗口[^\"“]*[\"“]([^\"”]+)[\"”]",
     )
-    for result in reversed(tool_results):
-        content = str(result.get("content") or "")
+    result_by_id = {
+        result.get("tool_call_id"): result
+        for result in tool_results
+        if result.get("tool_call_id")
+    }
+    for index in range(len(tool_calls) - 1, -1, -1):
+        tool_call = tool_calls[index]
+        if tool_call.name not in _WINDOW_TRANSITION_TOOLS:
+            continue
+        result = result_by_id.get(tool_call.id)
+        if result is None and index < len(tool_results):
+            result = tool_results[index]
+        content = str((result or {}).get("content") or "")
         for pattern in patterns:
             match = re.search(pattern, content)
             if match:
                 return match.group(1).strip()
-
-    if any(tool_call.name in _WINDOW_TRANSITION_TOOLS for tool_call in tool_calls):
+        # The latest transition may have changed foreground focus even when the
+        # tool cannot report a title (for example Ctrl+N). In that case capture
+        # the current foreground desktop and do not reuse an earlier title.
         return None
 
     for tool_call in reversed(tool_calls):

@@ -46,6 +46,55 @@ def test_transition_without_new_title_keeps_current_foreground_window() -> None:
     assert _verification_target_window(calls, [{"content": "clicked"}]) is None
 
 
+def test_latest_shortcut_transition_invalidates_earlier_launch_window() -> None:
+    calls = [
+        ToolCall("launch", "app_launch", {"name": "outlook.exe"}),
+        ToolCall(
+            "compose",
+            "hotkey",
+            {"keys": "Ctrl+N", "window": "Inbox - Outlook"},
+        ),
+    ]
+    results = [
+        {
+            "tool_call_id": "launch",
+            "content": "已启动应用: outlook.exe\nwindow_title: Inbox - Outlook",
+        },
+        {
+            "tool_call_id": "compose",
+            "content": "已执行组合键: Ctrl+N",
+        },
+    ]
+
+    assert _verification_target_window(calls, results) is None
+
+
+def test_latest_transition_uses_its_own_reported_window() -> None:
+    calls = [
+        ToolCall("launch", "app_launch", {"name": "outlook.exe"}),
+        ToolCall(
+            "compose",
+            "find_and_click",
+            {"target": "New Email", "window": "Inbox - Outlook"},
+        ),
+    ]
+    results = [
+        {
+            "tool_call_id": "launch",
+            "content": "window_title: Inbox - Outlook",
+        },
+        {
+            "tool_call_id": "compose",
+            "content": (
+                "clicked\n"
+                '检测到新窗口已弹出，已自动激活: "Untitled - Message"'
+            ),
+        },
+    ]
+
+    assert _verification_target_window(calls, results) == "Untitled - Message"
+
+
 def test_non_transition_action_can_reactivate_declared_window() -> None:
     calls = [
         ToolCall(
