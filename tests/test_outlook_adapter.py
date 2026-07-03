@@ -17,6 +17,33 @@ def _window(hwnd: int, title: str, process: str = "OUTLOOK.EXE") -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": {"elements": [{"name": "Subject", "control_type": "Edit"}]}},
+        {"elements": {"items": [{"name": "Subject", "control_type": "Edit"}]}},
+        {
+            "elements": {
+                "subject": {
+                    "name": "Subject",
+                    "control_type": "Edit",
+                }
+            }
+        },
+        {
+            "data": json.dumps({
+                "elements": [{"name": "Subject", "control_type": "Edit"}],
+            })
+        },
+        json.dumps([{"name": "Subject", "control_type": "Edit"}]),
+    ],
+)
+def test_parse_elements_accepts_supported_winpeekaboo_wrappers(payload) -> None:
+    elements = outlook._parse_elements(json.dumps(payload))
+
+    assert elements == [{"name": "Subject", "control_type": "Edit"}]
+
+
 @pytest.mark.asyncio
 async def test_open_compose_uses_shortcut_and_returns_new_window(monkeypatch) -> None:
     main = _window(1, "Inbox - Outlook")

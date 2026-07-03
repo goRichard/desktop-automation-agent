@@ -318,7 +318,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 64 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 69 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

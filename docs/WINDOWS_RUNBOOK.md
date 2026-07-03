@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-64 passed
+69 passed
 ```
 
 测试覆盖：
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 64 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 69 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -575,6 +575,9 @@ asyncio.run(main())
 窗口时，才降级为 `当前前台窗口/全屏`；任何情况下都不得回退到旧 Outlook 主窗口。
 `outlook_open_compose` 返回结构化的 `data.windowTitle`，Agent Loop 必须优先使用该字段，
 不能使用该工具调用参数中的 Outlook 主窗口标题覆盖它。
+`outlook_fill_message` 支持 WinPeekaboo UIA 输出为顶层数组、`data.elements`、
+`elements.items`、元素 ID 映射及 JSON 字符串包装。若仍提示 unsupported response shape，
+请保留错误中显示的顶层 keys 和原始 `list elements --json` 输出。
 
 默认 `checkpoint` 模式不会在每个输入动作后调用 Vision。测试时检查 Run 的
 `execution_memory`：之前成功的 `find_and_click`、`type_text` 等动作应按顺序存在，敏感
