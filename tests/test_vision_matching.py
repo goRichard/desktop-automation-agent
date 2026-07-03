@@ -173,6 +173,35 @@ async def test_find_and_click_refuses_invalid_coordinates(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_find_and_click_can_skip_new_window_polling(monkeypatch) -> None:
+    element = _element("E0001", "File name", "Edit")
+    clicks = []
+
+    async def fake_locate(*_, **__):
+        return {**element, "source": "UIA"}
+
+    async def fake_click(**kwargs):
+        clicks.append(kwargs)
+        return "ok"
+
+    async def forbidden_snapshot():
+        raise AssertionError("Window snapshot must be skipped")
+
+    monkeypatch.setattr(vision, "_locate_element", fake_locate)
+    monkeypatch.setattr(vision, "click", fake_click)
+    monkeypatch.setattr(vision, "_snapshot_windows", forbidden_snapshot)
+
+    result = await vision.find_and_click(
+        "File name",
+        window="Insert File",
+        detect_new_window=False,
+    )
+
+    assert "成功点击" in result
+    assert clicks == [{"on": "50,25", "window": "Insert File"}]
+
+
+@pytest.mark.asyncio
 async def test_new_window_detection_preserves_source_window_process(
     monkeypatch,
 ) -> None:

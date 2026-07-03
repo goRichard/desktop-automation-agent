@@ -79,6 +79,7 @@ async def _detect_and_activate_new_window(
     before: dict,
     delay: float = 0.8,
     source_window: Optional[str] = None,
+    timeout_seconds: float = 1.2,
 ) -> Optional[str]:
     """
     等待 delay 秒后，比较窗口列表，找到新出现的窗口并激活。
@@ -90,7 +91,7 @@ async def _detect_and_activate_new_window(
             wait_for_new_window,
             before,
             source_window,
-            3.0,
+            timeout_seconds,
         )
         if not title:
             return None
@@ -815,11 +816,13 @@ async def batch_locate_elements(
 # 组合类工具：定位 + 点击
 # ══════════════════════════════════════════════════════
 
-@tool(description="【推荐】在指定窗口中找到目标 UI 元素并点击。先使用规范化 UIA 候选评分，歧义时由 LLM 返回唯一 element key，无 UIA 候选时才使用视觉坐标。显式 automation_id 为严格约束，未命中直接失败。点击前校验坐标，点击后仅跟踪并激活同一应用进程的新窗口。")
+@tool(description="【推荐】在指定窗口中找到目标 UI 元素并点击。先使用规范化 UIA 候选评分，歧义时由 LLM 返回唯一 element key，无 UIA 候选时才使用视觉坐标。显式 automation_id 为严格约束，未命中直接失败。点击前校验坐标；可按需检测并激活同一应用进程的新窗口。")
 async def find_and_click(
     target: str,
     window: Optional[str] = None,
     automation_id: Optional[str] = None,
+    detect_new_window: bool = True,
+    new_window_timeout_seconds: float = 1.2,
 ) -> str:
     """定位元素 + 执行点击，并检测新窗口。"""
     try:
@@ -840,8 +843,8 @@ async def find_and_click(
             return f"❌ 定位到 '{target}'，但控件坐标无效，已拒绝点击。"
         cx, cy = point
 
-        # 点击前快照窗口列表
-        before_windows = await _snapshot_windows()
+        # 只有调用方需要跟踪弹窗时才采集窗口快照。
+        before_windows = await _snapshot_windows() if detect_new_window else {}
 
         await click(on=f"{cx},{cy}", window=window)
 
@@ -853,11 +856,14 @@ async def find_and_click(
         )
 
         # 点击后检测新窗口
-        new_win = await _detect_and_activate_new_window(
-            before_windows,
-            delay=0.8,
-            source_window=window,
-        )
+        new_win = None
+        if detect_new_window:
+            new_win = await _detect_and_activate_new_window(
+                before_windows,
+                delay=0.8,
+                source_window=window,
+                timeout_seconds=max(0.1, new_window_timeout_seconds),
+            )
         if new_win:
             result += f"\n🔄 检测到新窗口已弹出，已自动激活: \"{new_win}\""
 

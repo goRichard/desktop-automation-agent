@@ -16,8 +16,6 @@ from .winpeekaboo import (
     hotkey,
     list_elements,
     list_windows,
-    press_key,
-    type_text,
     window_activate,
 )
 
@@ -151,7 +149,7 @@ async def outlook_fill_message(
     )
 
 
-@tool(description="通过 Outlook 的 Attach File 界面添加附件；空列表直接跳过。")
+@tool(description="使用 Classic Outlook 键盘路径 Alt+N → A → F → Browse This PC 添加附件；空列表直接跳过。")
 async def outlook_add_attachments(
     window: str,
     paths: list[str],
@@ -160,8 +158,6 @@ async def outlook_add_attachments(
     if not paths:
         return _success("add_attachments", windowTitle=window, skipped=True, files=[])
 
-    window = await _resolve_compose_window_title(window)
-    await window_activate(window)
     resolved = [str(Path(path).expanduser().resolve()) for path in paths]
     missing = [path for path in resolved if not Path(path).is_file()]
     if missing:
@@ -169,11 +165,20 @@ async def outlook_add_attachments(
 
     attached = []
     for path in resolved:
+        # Subject 输入后窗口标题会从 Untitled 变成 "<Subject> - Message (HTML)"。
+        window = await _resolve_compose_window_title(window)
+        await window_activate(window)
+        await _open_attachment_menu(window)
+
         before = await _list_window_records()
         before_keys = {_window_key(item) for item in before}
-        result = await find_and_click(target="Attach File", window=window)
+        result = await find_and_click(
+            target="Browse This PC",
+            window=window,
+            new_window_timeout_seconds=timeout_seconds,
+        )
         if _looks_failed(result):
-            raise OutlookAutomationError(f"Attach File button failed: {result}")
+            raise OutlookAutomationError(f"Browse This PC failed: {result}")
 
         dialog_title = _reported_new_window_title(result)
         if not dialog_title:
@@ -185,15 +190,77 @@ async def outlook_add_attachments(
         if not dialog_title:
             raise OutlookAutomationError("Attachment file dialog did not appear")
 
-        await window_activate(dialog_title)
-        # The standard Windows file picker opens with the file-name field focused.
-        await type_text(text=path, window=dialog_title)
-        await press_key(key="Enter")
-        await asyncio.sleep(1.0)
+        await _submit_attachment_path(dialog_title, path, timeout_seconds)
         attached.append(path)
 
+    window = await _resolve_compose_window_title(window)
     await window_activate(window)
     return _success("add_attachments", windowTitle=window, files=attached)
+
+
+async def _open_attachment_menu(window: str) -> None:
+    actions = [
+        {"tool": "hotkey", "args": {"keys": "Alt+N", "window": window}},
+        {"tool": "sleep", "args": {"seconds": 0.25}},
+        {"tool": "press_key", "args": {"key": "A"}},
+        {"tool": "sleep", "args": {"seconds": 0.2}},
+        {"tool": "press_key", "args": {"key": "F"}},
+        {"tool": "sleep", "args": {"seconds": 0.4}},
+    ]
+    await run_actions(json.dumps(actions, ensure_ascii=False))
+
+
+async def _submit_attachment_path(
+    dialog_title: str,
+    path: str,
+    timeout_seconds: float,
+) -> None:
+    records = await _list_window_records()
+    dialog_keys = {
+        _window_key(item)
+        for item in records
+        if _window_title(item).lower() == dialog_title.lower()
+    }
+    if not dialog_keys:
+        raise OutlookAutomationError(
+            f"Attachment dialog was not found before file input: {dialog_title}"
+        )
+
+    await window_activate(dialog_title)
+    file_name_result = await find_and_click(
+        target="File name input field",
+        window=dialog_title,
+        detect_new_window=False,
+    )
+    if _looks_failed(file_name_result):
+        raise OutlookAutomationError(f"File name field failed: {file_name_result}")
+
+    input_actions = [
+        {"tool": "hotkey", "args": {"keys": "Ctrl+A", "window": dialog_title}},
+        {"tool": "type_text", "args": {"text": path, "window": dialog_title}},
+    ]
+    await run_actions(json.dumps(input_actions, ensure_ascii=False))
+
+    confirm_result = await find_and_click(
+        target="Insert/Open/OK/确定 confirmation button",
+        window=dialog_title,
+        detect_new_window=False,
+    )
+    if _looks_failed(confirm_result):
+        raise OutlookAutomationError(
+            f"Attachment dialog confirmation failed: {confirm_result}"
+        )
+
+    closed = await _wait_until(
+        lambda current: not any(
+            _window_key(item) in dialog_keys for item in current
+        ),
+        timeout_seconds,
+    )
+    if not closed:
+        raise OutlookAutomationError(
+            "Attachment dialog confirmation was clicked but the dialog is still open"
+        )
 
 
 @tool(description="在已确认的 Outlook 写信窗口使用 Alt+S 发送，并确认写信窗口已关闭。")

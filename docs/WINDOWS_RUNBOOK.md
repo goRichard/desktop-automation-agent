@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-82 passed
+84 passed
 ```
 
 测试覆盖：
@@ -219,7 +219,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 82 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 84 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -501,6 +501,11 @@ Invoke-RestMethod "$baseUrl/runs/$($run.id)/confirm" `
 批准后 Adapter 使用 `Alt+S`，并以写信窗口关闭作为成功条件。发送步骤没有 Agent
 fallback：如果发送结果不明确，Run 会失败并保留证据，不会由模型再次点击 Send。
 Windows 实机验证通过后，才发布该版本：
+
+附件流程使用 `Alt+N → A → F` 打开 Attach File 菜单，再点击 `Browse This PC`。文件对话框
+中定位 `File name` 输入框、写入附件绝对路径并点击 Insert/Open/OK/确定按钮。输入 Subject
+后写信窗口标题通常会变为 `<Subject> - Message (HTML)`；Adapter 必须在每个附件前重新
+解析当前写信窗口，不得继续使用 `Untitled - Message (HTML)`。
 
 ```powershell
 Invoke-RestMethod `

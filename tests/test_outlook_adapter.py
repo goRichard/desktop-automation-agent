@@ -175,3 +175,87 @@ async def test_empty_attachment_list_is_deterministically_skipped() -> None:
         paths=[],
     )
     assert result["data"]["skipped"] is True
+
+
+@pytest.mark.asyncio
+async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    attachment = tmp_path / "report.txt"
+    attachment.write_text("report", encoding="utf-8")
+    compose_title = "Quarterly Status - Message (HTML)"
+    dialog_title = "Insert File"
+    resolve_calls = []
+    action_batches = []
+    click_calls = []
+    activations = []
+    snapshots = iter([
+        [_window(2, compose_title)],
+        [_window(2, compose_title), _window(3, dialog_title, "OUTLOOK.EXE")],
+        [_window(2, compose_title)],
+    ])
+
+    async def fake_resolve(preferred=None):
+        resolve_calls.append(preferred)
+        return compose_title
+
+    async def fake_activate(title):
+        activations.append(title)
+        return "ok"
+
+    async def fake_run_actions(actions):
+        action_batches.append(json.loads(actions))
+        return "batch ok"
+
+    async def fake_list_records():
+        return next(snapshots)
+
+    async def fake_find_and_click(target, window=None, **kwargs):
+        click_calls.append((target, window, kwargs))
+        if target == "Browse This PC":
+            return (
+                "✅ clicked\n"
+                f'检测到新窗口已弹出，已自动激活: "{dialog_title}"'
+            )
+        return "✅ clicked"
+
+    monkeypatch.setattr(outlook, "_resolve_compose_window_title", fake_resolve)
+    monkeypatch.setattr(outlook, "window_activate", fake_activate)
+    monkeypatch.setattr(outlook, "run_actions", fake_run_actions)
+    monkeypatch.setattr(outlook, "_list_window_records", fake_list_records)
+    monkeypatch.setattr(outlook, "find_and_click", fake_find_and_click)
+
+    result = await outlook.outlook_add_attachments(
+        window="Untitled - Message (HTML)",
+        paths=[str(attachment)],
+        timeout_seconds=1,
+    )
+
+    menu_actions = action_batches[0]
+    assert menu_actions[0] == {
+        "tool": "hotkey",
+        "args": {"keys": "Alt+N", "window": compose_title},
+    }
+    assert [
+        action["args"]["key"]
+        for action in menu_actions
+        if action["tool"] == "press_key"
+    ] == ["A", "F"]
+    assert click_calls == [
+        (
+            "Browse This PC",
+            compose_title,
+            {"new_window_timeout_seconds": 1},
+        ),
+        ("File name input field", dialog_title, {"detect_new_window": False}),
+        (
+            "Insert/Open/OK/确定 confirmation button",
+            dialog_title,
+            {"detect_new_window": False},
+        ),
+    ]
+    assert action_batches[1][-1]["args"]["text"] == str(attachment.resolve())
+    assert resolve_calls[0] == "Untitled - Message (HTML)"
+    assert result["data"]["windowTitle"] == compose_title
+    assert activations[-1] == compose_title
