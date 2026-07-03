@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-61 passed
+64 passed
 ```
 
 测试覆盖：
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 61 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 64 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -562,7 +562,7 @@ asyncio.run(main())
 | A11 | 同时启动两个桌面 Run | 第二个 Run 等待桌面互斥锁 |
 | A12 | 暂停、恢复和取消 Run | 状态和 Event 顺序正确 |
 | A13 | 点击后弹出新窗口 | `verify_action_result` 的 `[验证截图目标]` 是新窗口标题 |
-| A14 | 同批执行 `app_launch` 和 `Ctrl+N` | `hotkey` 返回新写信窗口标题并自动激活；验证不得重新激活 Outlook 主窗口 |
+| A14 | `Ctrl+N` 或 `outlook_open_compose` 打开写信窗口 | 工具返回新写信窗口标题并自动激活；验证目标必须是该窗口 |
 
 邮件发送、Teams 发消息等外部副作用必须使用测试账号和测试接收人，并作为独立用例执行。
 无人值守模式只能运行已发布的固定 Skill 版本，并显式批准外部副作用。
@@ -573,6 +573,8 @@ asyncio.run(main())
 正常情况下，`Ctrl+N` 的工具结果应包含 `window_title: <新写信窗口标题>` 和
 `window_activated: true`，验证目标应为该写信窗口。检测超时或 WinPeekaboo 无法枚举新
 窗口时，才降级为 `当前前台窗口/全屏`；任何情况下都不得回退到旧 Outlook 主窗口。
+`outlook_open_compose` 返回结构化的 `data.windowTitle`，Agent Loop 必须优先使用该字段，
+不能使用该工具调用参数中的 Outlook 主窗口标题覆盖它。
 
 默认 `checkpoint` 模式不会在每个输入动作后调用 Vision。测试时检查 Run 的
 `execution_memory`：之前成功的 `find_and_click`、`type_text` 等动作应按顺序存在，敏感

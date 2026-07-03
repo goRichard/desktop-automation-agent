@@ -95,6 +95,78 @@ def test_latest_transition_uses_its_own_reported_window() -> None:
     assert _verification_target_window(calls, results) == "Untitled - Message"
 
 
+def test_outlook_adapter_structured_window_overrides_main_window_argument() -> None:
+    calls = [
+        ToolCall(
+            "compose",
+            "outlook_open_compose",
+            {"window": "Inbox - Outlook"},
+        )
+    ]
+    results = [{
+        "tool_call_id": "compose",
+        "content": (
+            '{"ok": true, "data": {"action": "open_compose", '
+            '"windowTitle": "Untitled - Message (HTML)"}, "error": null}'
+        ),
+        "data": {
+            "action": "open_compose",
+            "windowTitle": "Untitled - Message (HTML)",
+        },
+    }]
+
+    assert _verification_target_window(calls, results) == (
+        "Untitled - Message (HTML)"
+    )
+
+
+def test_outlook_adapter_open_compose_triggers_window_verification() -> None:
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.settings = SimpleNamespace(verification={"mode": "checkpoint"})
+    loop._plan = AgentLoop._parse_plan(
+        "1. 打开 Outlook 写信窗口（outlook_open_compose）"
+    )
+    calls = [
+        ToolCall(
+            "compose",
+            "outlook_open_compose",
+            {"window": "Inbox - Outlook"},
+        )
+    ]
+    results = [{
+        "tool_call_id": "compose",
+        "content": "structured adapter result",
+        "data": {
+            "action": "open_compose",
+            "windowTitle": "Untitled - Message (HTML)",
+        },
+        "success": True,
+    }]
+
+    assert loop._verification_reason(calls, results) == "window_transition"
+
+
+def test_outlook_send_does_not_reactivate_closed_compose_window() -> None:
+    calls = [
+        ToolCall(
+            "send",
+            "outlook_send_message",
+            {"window": "Status - Message (HTML)"},
+        )
+    ]
+    results = [{
+        "tool_call_id": "send",
+        "content": "sent",
+        "data": {
+            "action": "send",
+            "windowTitle": "Status - Message (HTML)",
+            "windowClosed": True,
+        },
+    }]
+
+    assert _verification_target_window(calls, results) is None
+
+
 def test_non_transition_action_can_reactivate_declared_window() -> None:
     calls = [
         ToolCall(

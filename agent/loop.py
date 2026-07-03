@@ -777,7 +777,15 @@ class AgentLoop:
 
         if config.get("verifyWindowTransitions", True) and (
             _reported_new_window(tool_results)
-            or any(tc.name in {"app_launch", "app_switch"} for tc in tool_calls)
+            or any(
+                tc.name in {
+                    "app_launch",
+                    "app_switch",
+                    "outlook_launch_classic",
+                    "outlook_open_compose",
+                }
+                for tc in tool_calls
+            )
         ):
             return "window_transition"
 
@@ -895,10 +903,20 @@ _WINDOW_TRANSITION_TOOLS = {
     "find_and_click",
     "find_and_click_batch",
     "hotkey",
+    "outlook_launch_classic",
+    "outlook_open_compose",
+    "outlook_resolve_compose",
+    "outlook_send_message",
     "press_key",
     "run_actions",
     "window_close",
     "window_minimize",
+}
+
+_WINDOW_RESULT_TARGET_TOOLS = {
+    "outlook_launch_classic",
+    "outlook_open_compose",
+    "outlook_resolve_compose",
 }
 
 
@@ -922,6 +940,10 @@ def _verification_target_window(tool_calls: list, tool_results: list[dict]) -> O
         result = result_by_id.get(tool_call.id)
         if result is None and index < len(tool_results):
             result = tool_results[index]
+        if tool_call.name in _WINDOW_RESULT_TARGET_TOOLS:
+            structured_title = _structured_result_window_title(result or {})
+            if structured_title:
+                return structured_title
         content = str((result or {}).get("content") or "")
         for pattern in patterns:
             match = re.search(pattern, content)
@@ -945,6 +967,23 @@ def _verification_target_window(tool_calls: list, tool_results: list[dict]) -> O
     return None
 
 
+def _structured_result_window_title(result: dict) -> Optional[str]:
+    data = result.get("data")
+    if not isinstance(data, dict):
+        content = result.get("content")
+        if isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                data = parsed.get("data")
+    if not isinstance(data, dict):
+        return None
+    value = data.get("windowTitle") or data.get("window_title")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _verification_wait_seconds(tool_calls: list) -> float:
     names = {tool_call.name for tool_call in tool_calls}
     if "app_launch" in names:
@@ -958,6 +997,11 @@ def _reported_new_window(tool_results: list[dict]) -> bool:
     return any(
         "检测到新窗口" in str(result.get("content") or "")
         or "window_title:" in str(result.get("content") or "")
+        or (
+            isinstance(result.get("data"), dict)
+            and result["data"].get("action") == "open_compose"
+            and bool(_structured_result_window_title(result))
+        )
         for result in tool_results
     )
 
