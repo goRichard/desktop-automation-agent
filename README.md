@@ -314,11 +314,11 @@ specs/          产品和架构规范
 pip install -e ".[dev]"
 python -m pytest -q
 python -m ruff check agent runtime skills tasks config credentials llm memory tests `
-  tools/actions.py tools/outlook.py tools/vision.py `
+  tools/actions.py tools/outlook.py tools/vision.py tools/winpeekaboo.py `
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 59 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 61 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

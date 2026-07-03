@@ -16,7 +16,7 @@ _SUPPORTED_ACTIONS: dict[str, list[str]] = {
     "click":           ["on", "window", "button"],
     "type_text":       ["text", "window", "delay"],
     "press_key":       ["key"],
-    "hotkey":          ["keys", "window"],
+    "hotkey":          ["keys", "window", "detect_new_window"],
     "window_activate": ["title"],
     "sleep":           ["seconds"],
     "capture_image":   ["output", "window", "region"],

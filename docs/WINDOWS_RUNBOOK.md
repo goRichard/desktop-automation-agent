@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-59 passed
+61 passed
 ```
 
 测试覆盖：
@@ -218,7 +218,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 59 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 61 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -229,7 +229,7 @@ python -m pytest -q 2>&1 |
 
 ```powershell
 python -m ruff check agent runtime skills tasks config credentials llm memory tests `
-  tools/actions.py tools/outlook.py tools/vision.py `
+  tools/actions.py tools/outlook.py tools/vision.py tools/winpeekaboo.py `
   --exclude tests/vision_bbox
 ```
 
@@ -562,7 +562,7 @@ asyncio.run(main())
 | A11 | 同时启动两个桌面 Run | 第二个 Run 等待桌面互斥锁 |
 | A12 | 暂停、恢复和取消 Run | 状态和 Event 顺序正确 |
 | A13 | 点击后弹出新窗口 | `verify_action_result` 的 `[验证截图目标]` 是新窗口标题 |
-| A14 | 同批执行 `app_launch` 和 `Ctrl+N` | 写信窗口保持前台；验证不得重新激活 Outlook 主窗口 |
+| A14 | 同批执行 `app_launch` 和 `Ctrl+N` | `hotkey` 返回新写信窗口标题并自动激活；验证不得重新激活 Outlook 主窗口 |
 
 邮件发送、Teams 发消息等外部副作用必须使用测试账号和测试接收人，并作为独立用例执行。
 无人值守模式只能运行已发布的固定 Skill 版本，并显式批准外部副作用。
@@ -570,8 +570,9 @@ asyncio.run(main())
 验证结果中的 `⚠️ 无法确定` 只表示截图遮挡、加载中或视觉模型无法判断，不会立即中止
 计划；`❌ 不符合预期` 才表示明确失败。对于新建邮件、打开对话框等场景，如果
 `[验证截图目标]` 仍显示旧窗口，请同时保留工具原始返回和截图用于排查。
-当 `Ctrl+N` 没有返回新窗口标题时，`[验证截图目标]` 应显示
-`当前前台窗口/全屏`，而不是 Outlook 主窗口标题。
+正常情况下，`Ctrl+N` 的工具结果应包含 `window_title: <新写信窗口标题>` 和
+`window_activated: true`，验证目标应为该写信窗口。检测超时或 WinPeekaboo 无法枚举新
+窗口时，才降级为 `当前前台窗口/全屏`；任何情况下都不得回退到旧 Outlook 主窗口。
 
 默认 `checkpoint` 模式不会在每个输入动作后调用 Vision。测试时检查 Run 的
 `execution_memory`：之前成功的 `find_and_click`、`type_text` 等动作应按顺序存在，敏感

@@ -8,9 +8,8 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
-from typing import Optional
+import time
+from typing import Any, Optional
 
 from .registry import tool
 
@@ -180,17 +179,131 @@ def press_key(key: str) -> str:
     return f"已按键: {key}"
 
 
-@tool(description="执行键盘组合键。keys 格式如 'Ctrl+C'、'Ctrl+Shift+T'、'Alt+F4'。可指定目标窗口。")
+_AUTO_DETECT_WINDOW_HOTKEYS = {"ctrl+n", "ctrl+shift+n", "ctrl+o"}
+
+
+@tool(description="执行键盘组合键。keys 格式如 'Ctrl+C'、'Ctrl+Shift+T'、'Alt+F4'。可指定目标窗口。Ctrl+N 等新建窗口快捷键会自动检测、激活并返回新窗口标题。")
 def hotkey(
     keys: str,
     window: Optional[str] = None,
+    detect_new_window: Optional[bool] = None,
 ) -> str:
-    """winpeekaboo hotkey --keys {keys} [--window window]"""
+    """执行快捷键，并按需检测快捷键创建的新窗口。"""
+    normalized_keys = keys.lower().replace(" ", "")
+    should_detect = (
+        detect_new_window
+        if detect_new_window is not None
+        else normalized_keys in _AUTO_DETECT_WINDOW_HOTKEYS
+    )
+    before = _window_snapshot() if should_detect else None
+
     args = ["hotkey", "--keys", keys]
     if window:
         args += ["--window", window]
     _run_wpb(*args)
-    return f"已执行组合键: {keys}"
+
+    result = f"已执行组合键: {keys}"
+    if should_detect and before is not None:
+        new_title = _wait_for_new_window(before, source_window=window)
+        if new_title:
+            activated = False
+            try:
+                _run_wpb("window", "activate", "--title", new_title)
+                activated = True
+            except Exception:
+                pass
+            result += (
+                f'\n🔄 检测到新窗口已弹出，已自动激活: "{new_title}"'
+                f"\nwindow_title: {new_title}"
+                f"\nwindow_activated: {str(activated).lower()}"
+            )
+    return result
+
+
+def _window_snapshot() -> Optional[dict[str, dict[str, Any]]]:
+    try:
+        value = json.loads(_run_wpb("list", "windows", "--json"))
+    except Exception:
+        return None
+    if not isinstance(value, list):
+        return None
+    result = {}
+    for item in value:
+        if not isinstance(item, dict) or not _window_record_title(item):
+            continue
+        if item.get("is_visible") is False:
+            continue
+        identity = str(item.get("hwnd") or f"title:{_window_record_title(item).lower()}")
+        result[identity] = item
+    return result
+
+
+def _wait_for_new_window(
+    before: dict[str, dict[str, Any]],
+    source_window: Optional[str],
+    timeout_seconds: float = 3.0,
+) -> Optional[str]:
+    source_process = _source_window_process(before, source_window)
+    deadline = time.monotonic() + timeout_seconds
+    time.sleep(0.25)
+    while time.monotonic() < deadline:
+        after = _window_snapshot()
+        if after is None:
+            return None
+        candidates = [
+            item
+            for identity, item in after.items()
+            if identity not in before
+        ]
+        if source_process:
+            candidates = [
+                item
+                for item in candidates
+                if not _window_record_process(item)
+                or _window_record_process(item) == source_process
+            ]
+        if candidates:
+            selected = max(candidates, key=_window_record_priority)
+            return _window_record_title(selected)
+        time.sleep(0.2)
+    return None
+
+
+def _source_window_process(
+    records: dict[str, dict[str, Any]],
+    source_window: Optional[str],
+) -> str:
+    if not source_window:
+        return ""
+    expected = source_window.lower()
+    for item in records.values():
+        title = _window_record_title(item).lower()
+        if expected in title or title in expected:
+            return _window_record_process(item)
+    return ""
+
+
+def _window_record_process(item: dict[str, Any]) -> str:
+    return str(item.get("process_name") or item.get("process") or "").lower()
+
+
+def _window_record_title(item: dict[str, Any]) -> str:
+    return str(item.get("title") or item.get("text") or "").strip()
+
+
+def _window_record_priority(item: dict[str, Any]) -> tuple[int, int, int]:
+    active = any(
+        bool(item.get(key))
+        for key in ("is_active", "is_foreground", "is_focused", "active")
+    )
+    bounds = item.get("bounds")
+    area = 0
+    if isinstance(bounds, dict):
+        try:
+            area = int(bounds.get("width", 0)) * int(bounds.get("height", 0))
+        except (TypeError, ValueError):
+            pass
+    return int(active), max(0, area), len(_window_record_title(item))
 
 
 # ══════════════════════════════════════════════════════
