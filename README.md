@@ -12,7 +12,8 @@ CLI/Runtime API 启动、WinPeekaboo 原子操作验证、Outlook/Edge/Teams 验
 ## 当前能力
 
 - Windows 桌面：通过 WinPeekaboo 启动应用、管理窗口、枚举 UIA 元素以及执行键鼠操作。
-- 视觉定位：UIA 确定性匹配优先，LLM 语义选择其次，视觉模型兜底。
+- 视觉定位：统一解析 WinPeekaboo UIA，候选评分优先，歧义时由 LLM 返回唯一元素 key，
+  最后才使用视觉模型兜底；显式 AutomationId 未命中时严格失败。
 - 浏览器：通过 Playwright 控制系统 Microsoft Edge。
 - Agent Loop：统一支持 OpenAI、OpenAI-compatible、Ollama 和 Azure OpenAI Provider。
 - 模型设置：支持运行时切换、健康检查、受管 CA 和 Windows Credential Manager 密钥。
@@ -314,11 +315,11 @@ specs/          产品和架构规范
 pip install -e ".[dev]"
 python -m pytest -q
 python -m ruff check agent runtime skills tasks config credentials llm memory tests `
-  tools/actions.py tools/outlook.py tools/vision.py tools/winpeekaboo.py `
+  tools/actions.py tools/outlook.py tools/uia.py tools/vision.py tools/winpeekaboo.py `
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 69 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 82 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

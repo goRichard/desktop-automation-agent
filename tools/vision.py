@@ -7,12 +7,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from llm import get_llm_client
 from .registry import tool
-from .winpeekaboo import capture_image, click, list_windows, window_activate
+from .uia import normalize_element_records
+from .winpeekaboo import (
+    capture_image,
+    click,
+    list_elements,
+    snapshot_windows,
+    wait_for_new_window,
+    window_activate,
+)
 import asyncio
 
 # 固定的截图临时目录，避免每次随机创建新目录
@@ -41,43 +50,50 @@ async def _visual_verify(
     return await client.vision(image_path=tmp_path, prompt=prompt)
 
 
+async def _capture_for_coordinates(
+    window: Optional[str],
+    screenshot_name: str,
+) -> str:
+    """Capture the full desktop so model coordinates remain screen-relative."""
+    if window:
+        await window_activate(window)
+        await asyncio.sleep(0.25)
+    tmp_path = _screenshot_path(screenshot_name)
+    await capture_image(output=tmp_path)
+    return tmp_path
+
+
 # ══════════════════════════════════════════════════════
 # 新窗口检测：点击后自动识别并激活新弹出的窗口
 # ══════════════════════════════════════════════════════
 
-async def _snapshot_windows() -> set:
-    """获取当前所有窗口的 hwnd 集合"""
+async def _snapshot_windows() -> dict:
+    """获取当前可见窗口快照。"""
     try:
-        raw = await list_windows()
-        wins = json.loads(raw)
-        return {w["hwnd"] for w in wins if w.get("is_visible")}
+        return await asyncio.to_thread(snapshot_windows) or {}
     except Exception:
-        return set()
+        return {}
 
 
 async def _detect_and_activate_new_window(
-    before: set,
+    before: dict,
     delay: float = 0.8,
+    source_window: Optional[str] = None,
 ) -> Optional[str]:
     """
     等待 delay 秒后，比较窗口列表，找到新出现的窗口并激活。
     返回新窗口的标题，如果没有新窗口则返回 None。
     """
-    import asyncio
-    await asyncio.sleep(delay)
+    await asyncio.sleep(min(delay, 0.25))
     try:
-        raw = await list_windows()
-        wins = json.loads(raw)
-        after = {w["hwnd"]: w for w in wins if w.get("is_visible")}
-        new_hwnds = set(after.keys()) - before
-        if not new_hwnds:
+        title = await asyncio.to_thread(
+            wait_for_new_window,
+            before,
+            source_window,
+            3.0,
+        )
+        if not title:
             return None
-        # 取标题最长的（通常是主窗口，不是工具栏/菜单）
-        new_wins = [after[h] for h in new_hwnds if after[h].get("title", "").strip()]
-        if not new_wins:
-            return None
-        target = max(new_wins, key=lambda w: len(w.get("title", "")))
-        title = target["title"]
         await window_activate(title)
         return title
     except Exception:
@@ -176,8 +192,10 @@ async def extract_text_from_image(image_path: str) -> str:
 _INTERACTIVE_TYPES = {
     "Button", "MenuItem", "Tab", "TabItem", "CheckBox",
     "RadioButton", "ComboBox", "Edit", "ListItem", "TreeItem",
-    "Slider", "Menu", "Link", "ListBox",
+    "Slider", "Menu", "Link", "ListBox", "Document", "Custom",
+    "DataItem", "Header", "HeaderItem", "ToolBar",
 }
+_NAMED_STRUCTURAL_TYPES = {"Pane", "Text", "Group"}
 
 
 async def _get_interactive_elements(window: Optional[str]) -> List[Dict]:
@@ -194,56 +212,75 @@ async def _get_interactive_elements(window: Optional[str]) -> List[Dict]:
         except Exception:
             pass
 
-    # 2. UIA 扫描
+    if not window:
+        return []
+
+    # 2. 统一通过 WinPeekaboo CLI 扫描和规范化
     try:
-        from winpeekaboo.uia.finder import ElementFinder
-        finder = ElementFinder()
-        if not finder.connect_by_title(window or ""):
-            return []
-
-        elements = finder.find_all_elements()
-
-        # 3. 过滤可交互类型 + bounds 非零
+        elements = normalize_element_records(await list_elements(window=window))
         result = []
         for e in elements:
-            if e.control_type not in _INTERACTIVE_TYPES:
+            control_type = e["control_type"]
+            if (
+                control_type not in _INTERACTIVE_TYPES
+                and not (
+                    control_type in _NAMED_STRUCTURAL_TYPES
+                    and (e["name"] or e["automation_id"])
+                )
+            ):
                 continue
-            if e.bounds.width == 0 or e.bounds.height == 0:
+            if e["is_visible"] is False or e["is_enabled"] is False:
                 continue
-            cx = e.bounds.x + e.bounds.width // 2
-            cy = e.bounds.y + e.bounds.height // 2
-            result.append({
-                "name": e.name or "",
-                "control_type": str(e.control_type),
-                "automation_id": e.automation_id or "",
-                "bounds": {
-                    "x": e.bounds.x,
-                    "y": e.bounds.y,
-                    "width": e.bounds.width,
-                    "height": e.bounds.height,
-                },
-                "center": (cx, cy),
-            })
-
+            bounds = e["bounds"]
+            if (
+                e["center"] is None
+                or not bounds
+                or bounds["width"] <= 0
+                or bounds["height"] <= 0
+            ):
+                continue
+            result.append(e)
         return result
     except Exception:
         return []
 
 
-async def _llm_select_element(elements: List[Dict], query: str) -> str:
+async def _llm_select_element(
+    elements: List[Dict],
+    query: str,
+) -> Optional[Dict]:
     """
     Stage 1b: 用对话模型（非视觉）从 UIA 元素列表中语义匹配 query。
-    返回最匹配元素的 name 字段原始值，无匹配时返回 "NOT_FOUND"。
+    返回模型选择的唯一元素记录，无匹配时返回 None。
     """
     if not elements:
-        return "NOT_FOUND"
+        return None
 
-    # 构造元素列表文本
+    ranked = _rank_element_candidates(elements, query)
+    candidates = [element for _, element in ranked[:60]]
+    if not candidates:
+        return None
+
+    # 使用唯一 key，避免同名和空名称控件被解析为列表中的第一个。
     lines = []
-    for e in elements:
-        parts = [f'name="{e["name"]}"', f'type={e["control_type"]}']
+    by_key = {}
+    for index, e in enumerate(candidates):
+        key = str(e.get("element_key") or f"E{index + 1:04d}")
+        by_key[key] = e
+        parts = [
+            f"[{key}] name={json.dumps(e['name'], ensure_ascii=False)}",
+            f"type={e['control_type']}",
+        ]
         if e["automation_id"]:
-            parts.append(f'id={e["automation_id"]}')
+            parts.append(
+                f"id={json.dumps(e['automation_id'], ensure_ascii=False)}"
+            )
+        bounds = e.get("bounds") or {}
+        parts.append(
+            "bounds="
+            f"{bounds.get('x', 0)},{bounds.get('y', 0)},"
+            f"{bounds.get('width', 0)},{bounds.get('height', 0)}"
+        )
         lines.append("- " + "  ".join(parts))
     elements_text = "\n".join(lines)
 
@@ -251,9 +288,9 @@ async def _llm_select_element(elements: List[Dict], query: str) -> str:
         f"以下是 Windows 窗口中所有可交互的 UI 元素：\n\n"
         f"{elements_text}\n\n"
         f"用户想操作：{query}\n\n"
-        f"请从上方列表中找到最匹配的元素，只返回该元素的 name 字段原始内容。\n"
+        f"请从上方列表中找到最匹配的元素，只返回方括号中的 element key。\n"
         f"规则：\n"
-        f"1. 只输出 name 字段的原始文本，不要引号，不要解释\n"
+        f"1. 只输出类似 E0001 的 key，不要引号，不要解释\n"
         f"2. 如果没有任何匹配的元素，输出：NOT_FOUND"
     )
 
@@ -265,10 +302,10 @@ async def _llm_select_element(elements: List[Dict], query: str) -> str:
 
     try:
         response = await client.chat(messages)
-        result = (response.content or "").strip()
-        return result if result else "NOT_FOUND"
+        result = (response.content or "").strip().strip("`\"'")
+        return by_key.get(result)
     except Exception:
-        return "NOT_FOUND"
+        return None
 
 
 def _match_by_automation_id(elements: List[Dict], target: str) -> Optional[Dict]:
@@ -277,39 +314,13 @@ def _match_by_automation_id(elements: List[Dict], target: str) -> Optional[Dict]
     automation_id 是语言无关的控件标识符，是最可靠的跨语言匹配方式。
     如 Outlook 的 Send 按钮，中文版叫 "发送" 英文版叫 "Send"，但 automation_id 始终是 "Send"。
     """
-    target_lower = target.lower()
-    for e in elements:
-        aid = e.get("automation_id", "")
-        if aid and aid.lower() == target_lower:
-            return e
-    return None
-
-
-def _match_element_by_name(elements: List[Dict], name: str) -> Optional[Dict]:
-    """
-    Stage 1c: 在元素列表中验证并查找 LLM 返回的 name。
-    精确匹配优先，子串兜底，最后尝试 automation_id。
-    返回 None 表示 LLM 出现幻觉（name 不在列表中）。
-    """
-    if not name or name == "NOT_FOUND":
-        return None
-
-    # 精确匹配
-    for e in elements:
-        if e["name"] == name:
-            return e
-
-    # 子串匹配（LLM 可能返回局部名称）
-    for e in elements:
-        if e["name"] and name in e["name"]:
-            return e
-
-    # automation_id 兜底（如 LLM 返回 "Send" 但元素 name 是 "发送"）
-    matched = _match_by_automation_id(elements, name)
-    if matched:
-        return matched
-
-    return None
+    expected = _normalize_match_text(target)
+    matches = [
+        element
+        for element in elements
+        if _normalize_match_text(str(element.get("automation_id") or "")) == expected
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 # 单元素定位 prompt
@@ -424,29 +435,8 @@ async def _locate_element(
             matched = _match_by_automation_id(elements, automation_id)
             if matched:
                 return {**matched, "source": "UIA"}
-        # automation_id 未找到时，不降级到 LLM（因为 caller 明确指定了 ID）
-        # 直接进入 VLM 视觉兜底
-        tmp_path = _screenshot_path("locate_aid")
-        await capture_image(output=tmp_path, window=window)
-        client = get_llm_client()
-        prompt = VISION_BBOX_PROMPT.format(target=target)
-        response, scale_x, scale_y = await client.vision_for_coords(
-            image_path=tmp_path, prompt=prompt
-        )
-        coords = _parse_vision_bbox(response)
-        if coords is None:
-            return None
-        raw_cx, raw_cy = coords
-        cx = int(raw_cx * scale_x)
-        cy = int(raw_cy * scale_y)
-        return {
-            "name": target,
-            "control_type": "Unknown",
-            "automation_id": automation_id,
-            "bounds": {"x": cx - 10, "y": cy - 10, "width": 20, "height": 20},
-            "center": (cx, cy),
-            "source": "VLM",
-        }
+        # 显式 automation_id 是严格确定性约束，未命中时禁止静默改用视觉坐标。
+        return None
 
     # ── Stage 1: automation_id + name 快速匹配（零模型调用）────
     if elements is None:
@@ -460,14 +450,12 @@ async def _locate_element(
 
     # ── Stage 2: LLM 语义匹配 ─────────────────────────────
     if elements:
-        selected_name = await _llm_select_element(elements, target)
-        matched = _match_element_by_name(elements, selected_name)
+        matched = await _llm_select_element(elements, target)
         if matched:
             return {**matched, "source": "UIA"}
 
     # ── Stage 3: VLM 视觉兜底 ───────────────────────────────
-    tmp_path = _screenshot_path("locate")
-    await capture_image(output=tmp_path, window=window)
+    tmp_path = await _capture_for_coordinates(window, "locate")
 
     client = get_llm_client()
     prompt = VISION_BBOX_PROMPT.format(target=target)
@@ -479,9 +467,10 @@ async def _locate_element(
     if coords is None:
         return None
 
-    raw_cx, raw_cy = coords
-    cx = int(raw_cx * scale_x)
-    cy = int(raw_cy * scale_y)
+    point = _scale_vision_point(tmp_path, coords, scale_x, scale_y)
+    if point is None:
+        return None
+    cx, cy = point
 
     return {
         "name": target,
@@ -504,39 +493,137 @@ _NUMBER_MAPPING = {
 
 def _simple_match_element(elements: List[Dict], target: str) -> Optional[Dict]:
     """
-    批量场景的快速字符串匹配（零模型调用）。
-    优先级: automation_id > 精确 name > 数字映射 > target 在 name 中 > name 在 target 中。
+    快速确定性匹配。候选分数接近时拒绝猜测，交给语义阶段消歧。
     """
-    # 最高优先级: automation_id 精确匹配（语言无关，如 "Send" 匹配到 name="发送" 的元素）
-    matched = _match_by_automation_id(elements, target)
-    if matched:
-        return matched
-    # 精确 name 匹配
-    for e in elements:
-        if e["name"] == target:
-            return e
-    # 数字映射匹配（处理 "1" ↔ "一" 等跨语言场景）
-    if target in _NUMBER_MAPPING:
-        mapped = _NUMBER_MAPPING[target]
-        for e in elements:
-            if e["name"] == mapped:
-                return e
-    # target 在 name 中
-    for e in elements:
-        if e["name"] and target in e["name"]:
-            return e
-    # name 在 target 中
-    for e in elements:
-        if e["name"] and e["name"] in target:
-            return e
-    return None
+    ranked = _rank_element_candidates(elements, target)
+    if not ranked or ranked[0][0] < 500:
+        return None
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 30:
+        return None
+    return ranked[0][1]
+
+
+def _rank_element_candidates(
+    elements: List[Dict],
+    target: str,
+) -> list[tuple[int, Dict]]:
+    ranked = [
+        (_element_match_score(element, target), element)
+        for element in elements
+    ]
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked
+
+
+def _element_match_score(element: Dict, target: str) -> int:
+    target_text = _normalize_match_text(target)
+    name = _normalize_match_text(str(element.get("name") or ""))
+    automation_id = _normalize_match_text(
+        str(element.get("automation_id") or "")
+    )
+    if not target_text:
+        return 0
+
+    score = 0
+    if automation_id and automation_id == target_text:
+        score = 1000
+    elif name and name == target_text:
+        score = 900
+    elif target_text in _NUMBER_MAPPING and name == _NUMBER_MAPPING[target_text]:
+        score = 880
+    elif name and target_text in name:
+        score = 700 + min(100, len(target_text) * 100 // max(1, len(name)))
+    elif name and len(name) >= 2 and name in target_text:
+        score = 620 + min(
+            160,
+            len(name) * 160 // max(1, len(target_text)),
+        )
+    elif name:
+        target_tokens = set(target_text.split())
+        name_tokens = set(name.split())
+        overlap = target_tokens & name_tokens
+        if overlap:
+            score = 400 + int(
+                180 * len(overlap) / len(target_tokens | name_tokens)
+            )
+
+    preferred_types = _preferred_control_types(target_text)
+    if preferred_types and element.get("control_type") in preferred_types:
+        score += 40
+    if element.get("is_visible") is False or element.get("is_enabled") is False:
+        score -= 500
+    return score
+
+
+def _normalize_match_text(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value).casefold().replace("&", "")
+    return " ".join(re.sub(r"[\W_]+", " ", value).split())
+
+
+def _preferred_control_types(target: str) -> set[str]:
+    if any(term in target for term in ("button", "按钮", "按鈕")):
+        return {"Button"}
+    if any(
+        term in target
+        for term in ("input", "field", "textbox", "输入", "輸入")
+    ):
+        return {"Edit", "Document"}
+    if any(term in target for term in ("link", "链接", "連結")):
+        return {"Link"}
+    if any(term in target for term in ("menu", "菜单", "選單")):
+        return {"Menu", "MenuItem"}
+    return set()
+
+
+def _validated_click_point(element: Dict) -> Optional[tuple[int, int]]:
+    center = element.get("center")
+    if not isinstance(center, (list, tuple)) or len(center) != 2:
+        return None
+    try:
+        x, y = int(center[0]), int(center[1])
+    except (TypeError, ValueError):
+        return None
+    bounds = element.get("bounds")
+    if isinstance(bounds, dict):
+        try:
+            left = int(bounds["x"])
+            top = int(bounds["y"])
+            right = left + int(bounds["width"])
+            bottom = top + int(bounds["height"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if right <= left or bottom <= top:
+            return None
+        if not (left <= x < right and top <= y < bottom):
+            return None
+    return x, y
+
+
+def _scale_vision_point(
+    image_path: str,
+    coords: tuple[int, int],
+    scale_x: float,
+    scale_y: float,
+) -> Optional[tuple[int, int]]:
+    from PIL import Image
+
+    try:
+        with Image.open(image_path) as image:
+            width, height = image.size
+    except Exception:
+        return None
+    x = int(coords[0] * scale_x)
+    y = int(coords[1] * scale_y)
+    if not (0 <= x < width and 0 <= y < height):
+        return None
+    return x, y
 
 
 # ══════════════════════════════════════════════════════
 # 定位类工具：定位 UI 元素位置（不点击）
 # ══════════════════════════════════════════════════════
 
-@tool(description="定位窗口中指定 UI 元素的位置，返回元素名称、类型、坐标等结构化信息，不执行点击。优先通过 UIA + LLM 精确定位，UIA 无法覆盖时自动使用视觉模型兜底。target 为元素描述（如'保存按钮'、'文件菜单'），window 为可选的目标窗口标题。automation_id 为可选 UIA AutomationId，传入后直接确定性匹配，跳过 LLM 语义匹配（零模型调用）。")
+@tool(description="定位窗口中指定 UI 元素的位置，不执行点击。优先使用规范化 UIA 候选评分；候选有歧义时由 LLM 返回唯一 element key；无 automation_id 时才允许视觉兜底。显式 automation_id 为严格约束，未命中直接失败，不调用模型。")
 async def find_element(
     target: str,
     window: Optional[str] = None,
@@ -547,11 +634,19 @@ async def find_element(
         element = await _locate_element(target, window, automation_id=automation_id)
         if element is None:
             aid_hint = f" (automation_id={automation_id})" if automation_id else ""
+            detail = (
+                "严格 UIA automation_id 未命中；未启用视觉降级。"
+                if automation_id
+                else "UIA 未找到匹配元素，视觉模型也无法识别坐标。"
+            )
             return (
                 f"❌ 无法定位 '{target}'{aid_hint}。\n"
-                f"UIA 未找到匹配元素，视觉模型也无法识别坐标。"
+                f"{detail}"
             )
-        cx, cy = element["center"]
+        point = _validated_click_point(element)
+        if point is None:
+            return f"❌ 定位到 '{target}'，但控件坐标无效。"
+        cx, cy = point
         aid_info = f" aid={element.get('automation_id', '')}" if element.get('automation_id') else ""
         return (
             f"✅ [{element['source']}] 找到 '{target}'\n"
@@ -609,18 +704,23 @@ async def batch_locate_elements(
         # 4. 匹配：automation_id 优先 → 字符串匹配 → LLM 语义匹配 → VLM 兜底
         matched: Dict[int, Dict] = {}  # index -> element
         unmatched_indices: List[int] = []
+        strict_unmatched: set[int] = set()
 
         for i, item in enumerate(normalized):
             t = item["target"]
             aid = item["automation_id"]
 
-            if elements:
-                # automation_id 精确匹配（确定性，零模型调用）
-                if aid:
+            # automation_id 精确匹配（确定性，零模型调用）
+            if aid:
+                if elements:
                     m = _match_by_automation_id(elements, aid)
                     if m:
                         matched[i] = m
                         continue
+                strict_unmatched.add(i)
+                unmatched_indices.append(i)
+                continue
+            if elements:
                 # 字符串快速匹配（含数字映射）
                 m = _simple_match_element(elements, t)
                 if m:
@@ -631,12 +731,13 @@ async def batch_locate_elements(
 
         # 5. LLM 语义匹配（处理跨语言、同义词等字符串匹配失败的场景）
         if unmatched_indices and elements:
-            llm_unmatched = []
+            llm_unmatched = list(strict_unmatched)
             for i in unmatched_indices:
+                if i in strict_unmatched:
+                    continue
                 t = normalized[i]["target"]
                 # 用 LLM 从元素列表中语义匹配
-                selected_name = await _llm_select_element(elements, t)
-                m = _match_element_by_name(elements, selected_name)
+                m = await _llm_select_element(elements, t)
                 if m:
                     matched[i] = m
                 else:
@@ -644,11 +745,14 @@ async def batch_locate_elements(
             unmatched_indices = llm_unmatched
 
         # 6. 仍未匹配的目标用 VLM 批量兜底
-        if unmatched_indices:
-            tmp_path = _screenshot_path("batch_locate")
-            await capture_image(output=tmp_path, window=window)
+        visual_indices = [
+            index for index in unmatched_indices
+            if index not in strict_unmatched
+        ]
+        if visual_indices:
+            tmp_path = await _capture_for_coordinates(window, "batch_locate")
 
-            unmatched_targets = [normalized[i]["target"] for i in unmatched_indices]
+            unmatched_targets = [normalized[i]["target"] for i in visual_indices]
             targets_text = "\n".join(
                 f"  {j+1}. {t}" for j, t in enumerate(unmatched_targets)
             )
@@ -660,13 +764,19 @@ async def batch_locate_elements(
             )
             batch_coords = _parse_vision_batch(response)
 
-            for j, orig_idx in enumerate(unmatched_indices):
+            for j, orig_idx in enumerate(visual_indices):
                 key = str(j + 1)
                 coords = batch_coords.get(key)
                 if coords:
-                    raw_cx, raw_cy = coords
-                    cx = int(raw_cx * scale_x)
-                    cy = int(raw_cy * scale_y)
+                    point = _scale_vision_point(
+                        tmp_path,
+                        coords,
+                        scale_x,
+                        scale_y,
+                    )
+                    if point is None:
+                        continue
+                    cx, cy = point
                     matched[orig_idx] = {
                         "name": normalized[orig_idx]["target"],
                         "center": (cx, cy),
@@ -705,7 +815,7 @@ async def batch_locate_elements(
 # 组合类工具：定位 + 点击
 # ══════════════════════════════════════════════════════
 
-@tool(description="【推荐】在指定窗口中找到目标 UI 元素并点击。这是常规左键点击的首选工具，优先通过 UIA + LLM 精确定位，UIA 无法覆盖时自动使用视觉模型兜底。当传入 automation_id 时直接确定性匹配（零模型调用，最快最准）。点击后自动检测是否有新窗口弹出，有则自动激活新窗口。target 为元素描述（如'保存按鈕'、'文件菜单'、'确定'），window 为可选的目标窗口标题，automation_id 为可选 UIA AutomationId 精确匹配。")
+@tool(description="【推荐】在指定窗口中找到目标 UI 元素并点击。先使用规范化 UIA 候选评分，歧义时由 LLM 返回唯一 element key，无 UIA 候选时才使用视觉坐标。显式 automation_id 为严格约束，未命中直接失败。点击前校验坐标，点击后仅跟踪并激活同一应用进程的新窗口。")
 async def find_and_click(
     target: str,
     window: Optional[str] = None,
@@ -716,11 +826,19 @@ async def find_and_click(
         element = await _locate_element(target, window, automation_id=automation_id)
         if element is None:
             aid_hint = f" (automation_id={automation_id})" if automation_id else ""
+            detail = (
+                "严格 UIA automation_id 未命中；未启用视觉降级。"
+                if automation_id
+                else "UIA 未找到匹配元素，视觉模型也无法识别坐标。"
+            )
             return (
                 f"❌ 无法定位 '{target}'{aid_hint}。\n"
-                f"UIA 未找到匹配元素，视觉模型也无法识别坐标。"
+                f"{detail}"
             )
-        cx, cy = element["center"]
+        point = _validated_click_point(element)
+        if point is None:
+            return f"❌ 定位到 '{target}'，但控件坐标无效，已拒绝点击。"
+        cx, cy = point
 
         # 点击前快照窗口列表
         before_windows = await _snapshot_windows()
@@ -735,7 +853,11 @@ async def find_and_click(
         )
 
         # 点击后检测新窗口
-        new_win = await _detect_and_activate_new_window(before_windows, delay=0.8)
+        new_win = await _detect_and_activate_new_window(
+            before_windows,
+            delay=0.8,
+            source_window=window,
+        )
         if new_win:
             result += f"\n🔄 检测到新窗口已弹出，已自动激活: \"{new_win}\""
 
@@ -791,8 +913,7 @@ async def find_and_click_batch(
             llm_unmatched = []
             for i in unmatched_indices:
                 t = target_list[i]
-                selected_name = await _llm_select_element(elements, t)
-                m = _match_element_by_name(elements, selected_name)
+                m = await _llm_select_element(elements, t)
                 if m:
                     matched_results[i] = {**m, "source": "UIA"}
                 else:
@@ -801,8 +922,7 @@ async def find_and_click_batch(
 
         # 5. 仍未匹配的目标用 VLM 批量兜底
         if unmatched_indices:
-            tmp_path = _screenshot_path("batch_click")
-            await capture_image(output=tmp_path, window=window)
+            tmp_path = await _capture_for_coordinates(window, "batch_click")
 
             unmatched_targets = [target_list[i] for i in unmatched_indices]
             targets_text = "\n".join(
@@ -820,9 +940,15 @@ async def find_and_click_batch(
                 key = str(j + 1)
                 coords = batch_coords.get(key)
                 if coords:
-                    raw_cx, raw_cy = coords
-                    cx = int(raw_cx * scale_x)
-                    cy = int(raw_cy * scale_y)
+                    point = _scale_vision_point(
+                        tmp_path,
+                        coords,
+                        scale_x,
+                        scale_y,
+                    )
+                    if point is None:
+                        continue
+                    cx, cy = point
                     matched_results[orig_idx] = {
                         "name": target_list[orig_idx],
                         "control_type": "Unknown",
@@ -838,7 +964,11 @@ async def find_and_click_batch(
                 results.append(f"  ❌ [{i+1}] '{t}': 未找到")
                 continue
 
-            cx, cy = element["center"]
+            point = _validated_click_point(element)
+            if point is None:
+                results.append(f"  ❌ [{i+1}] '{t}': 坐标无效，已拒绝点击")
+                continue
+            cx, cy = point
 
             # 点击前快照窗口
             before_windows = await _snapshot_windows()
@@ -847,7 +977,11 @@ async def find_and_click_batch(
             results.append(f"  ✅ [{i+1}] '{t}': [{element['source']}] 已点击 ({cx}, {cy})")
 
             # 检测新窗口
-            new_win = await _detect_and_activate_new_window(before_windows, delay=0.5)
+            new_win = await _detect_and_activate_new_window(
+                before_windows,
+                delay=0.5,
+                source_window=window,
+            )
             if new_win:
                 results.append(f"  🔄 检测到新窗口已弹出，已自动激活: \"{new_win}\"。剩余 {len(target_list)-i-1} 个目标将在新窗口中操作，请确认是否继续。")
                 break

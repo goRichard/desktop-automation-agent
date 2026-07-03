@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from .actions import run_actions
 from .registry import tool
+from .uia import UIAResponseError, parse_element_records
 from .vision import find_and_click
 from .winpeekaboo import (
     app_launch,
@@ -286,103 +287,10 @@ async def _wait_until(predicate, timeout_seconds: float) -> bool:
 
 
 def _parse_elements(raw: Any) -> list[dict[str, Any]]:
-    value = raw
     try:
-        for _ in range(3):
-            if not isinstance(value, str):
-                break
-            value = json.loads(value)
-    except (TypeError, json.JSONDecodeError) as error:
-        raise OutlookAutomationError(f"Invalid WinPeekaboo element response: {error}") from error
-
-    elements = _extract_element_records(value)
-    if elements is None:
-        raise OutlookAutomationError(
-            "Unsupported WinPeekaboo element response shape: "
-            f"{_response_shape(value)}"
-        )
-    return elements
-
-
-def _extract_element_records(
-    value: Any,
-    depth: int = 0,
-) -> Optional[list[dict[str, Any]]]:
-    if depth > 5:
-        return None
-    if isinstance(value, str):
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            return None
-        return _extract_element_records(decoded, depth + 1)
-    if isinstance(value, list):
-        if not value:
-            return []
-        records = [
-            item
-            for item in value
-            if isinstance(item, dict) and _looks_like_element_record(item)
-        ]
-        if records:
-            return records
-        combined: list[dict[str, Any]] = []
-        for item in value:
-            nested = _extract_element_records(item, depth + 1)
-            if nested:
-                combined.extend(nested)
-        return combined or None
-    if not isinstance(value, dict):
-        return None
-    if _looks_like_element_record(value):
-        return [value]
-
-    for key in ("elements", "items", "data", "result", "value", "records"):
-        if key not in value:
-            continue
-        nested = _extract_element_records(value[key], depth + 1)
-        if nested is not None:
-            return nested
-
-    records = [
-        item
-        for item in value.values()
-        if isinstance(item, dict) and _looks_like_element_record(item)
-    ]
-    if records:
-        return records
-
-    combined = []
-    for item in value.values():
-        if not isinstance(item, (dict, list)):
-            continue
-        nested = _extract_element_records(item, depth + 1)
-        if nested:
-            combined.extend(nested)
-    return combined or None
-
-
-def _looks_like_element_record(value: dict[str, Any]) -> bool:
-    return bool(
-        {
-            "name",
-            "control_type",
-            "controlType",
-            "automation_id",
-            "automationId",
-            "bounds",
-            "center",
-        }
-        & set(value)
-    )
-
-
-def _response_shape(value: Any) -> str:
-    if isinstance(value, dict):
-        return f"object keys={list(value)[:10]}"
-    if isinstance(value, list):
-        return f"array length={len(value)}"
-    return type(value).__name__
+        return parse_element_records(raw)
+    except UIAResponseError as error:
+        raise OutlookAutomationError(str(error)) from error
 
 
 def _field_point(elements: list[dict[str, Any]], field: str) -> Optional[tuple[int, int]]:

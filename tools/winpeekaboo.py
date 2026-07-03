@@ -269,6 +269,20 @@ def _wait_for_new_window(
     return None
 
 
+def snapshot_windows() -> Optional[dict[str, dict[str, Any]]]:
+    """Return normalized visible windows for other adapter modules."""
+    return _window_snapshot()
+
+
+def wait_for_new_window(
+    before: dict[str, dict[str, Any]],
+    source_window: Optional[str] = None,
+    timeout_seconds: float = 3.0,
+) -> Optional[str]:
+    """Wait for a same-process window created after the supplied snapshot."""
+    return _wait_for_new_window(before, source_window, timeout_seconds)
+
+
 def _source_window_process(
     records: dict[str, dict[str, Any]],
     source_window: Optional[str],

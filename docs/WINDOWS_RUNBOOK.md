@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-69 passed
+82 passed
 ```
 
 测试覆盖：
@@ -210,7 +210,8 @@ python -m pytest -q
 | Runtime API | Token 鉴权、Skill/Task/Run 生命周期、模型和证书接口 |
 | Persistence | Run、Step、Event、Evidence 的 SQLite 持久化 |
 | Skill | Schema、版本生命周期、输入、快捷键批处理、Outlook Adapter、嵌套 Skill、执行策略 |
-| Action Verification | 分层检查点、新窗口跟随、执行记忆、警告/失败语义 |
+| UI/Action | UIA 规范化、候选评分、歧义拒绝、严格 AutomationId、新窗口跟随 |
+| Action Verification | 分层检查点、执行记忆、警告/失败语义 |
 | Task/Scheduler | Cron、时区、手动执行、旧任务迁移 |
 
 当前可能出现两个已知 warning：
@@ -218,7 +219,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 69 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 82 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -229,7 +230,7 @@ python -m pytest -q 2>&1 |
 
 ```powershell
 python -m ruff check agent runtime skills tasks config credentials llm memory tests `
-  tools/actions.py tools/outlook.py tools/vision.py tools/winpeekaboo.py `
+  tools/actions.py tools/outlook.py tools/uia.py tools/vision.py tools/winpeekaboo.py `
   --exclude tests/vision_bbox
 ```
 
@@ -382,6 +383,14 @@ python -m winpeekaboo image --output .\screenshots\notepad-smoke.png `
 - 文本只输入一次且字符完整。
 - UIA 元素列表可返回。
 - 截图内容和目标窗口一致。
+
+`find_and_click` 额外验收：
+
+- `Document`、`Custom` 等 Outlook 控件不会因 ControlType 格式差异被直接丢弃。
+- 大小写和标点差异不影响精确候选；多个候选分数接近时不得直接点击第一个。
+- 语义消歧返回唯一 `element_key`，不是可能重复或为空的控件名称。
+- 显式传入 `automation_id` 时，未命中应直接失败并显示“未启用视觉降级”。
+- 点击产生新窗口时，只跟踪来源应用同一进程的新窗口。
 
 本测试不保存文件，不执行删除操作。关闭记事本时如出现保存提示，选择“不保存”。
 
