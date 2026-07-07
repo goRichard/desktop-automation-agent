@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from pathlib import Path
 from typing import Any, Optional
 
 from .actions import run_actions
 from .registry import tool
 from .uia import UIAResponseError, parse_element_records
-from .vision import find_and_click
 from .winpeekaboo import (
     app_launch,
     hotkey,
@@ -172,21 +170,18 @@ async def outlook_add_attachments(
 
         before = await _list_window_records()
         before_keys = {_window_key(item) for item in before}
-        result = await find_and_click(
-            target="Browse This PC",
+        await _click_uia_control(
             window=window,
-            new_window_timeout_seconds=timeout_seconds,
+            role="Browse This PC",
+            aliases=("Browse This PC", "浏览此电脑", "瀏覽此電腦"),
+            automation_ids=("BrowseThisPC",),
+            control_types=("Button", "MenuItem", "ListItem"),
         )
-        if _looks_failed(result):
-            raise OutlookAutomationError(f"Browse This PC failed: {result}")
-
-        dialog_title = _reported_new_window_title(result)
-        if not dialog_title:
-            dialog = await _wait_for_window(
-                lambda item: _window_key(item) not in before_keys,
-                timeout_seconds,
-            )
-            dialog_title = _window_title(dialog) if dialog else None
+        dialog = await _wait_for_window(
+            lambda item: _window_key(item) not in before_keys,
+            timeout_seconds,
+        )
+        dialog_title = _window_title(dialog) if dialog else None
         if not dialog_title:
             raise OutlookAutomationError("Attachment file dialog did not appear")
 
@@ -227,29 +222,46 @@ async def _submit_attachment_path(
         )
 
     await window_activate(dialog_title)
-    file_name_result = await find_and_click(
-        target="File name input field",
-        window=dialog_title,
-        detect_new_window=False,
+    raw_elements = await list_elements(window=dialog_title)
+    elements = _parse_elements(raw_elements)
+    file_name_point = _uia_control_point(
+        elements,
+        aliases=("File name", "File name:", "文件名", "檔案名稱"),
+        automation_ids=("FileNameControlHost", "1001", "1148"),
+        control_types=("Edit", "ComboBox"),
     )
-    if _looks_failed(file_name_result):
-        raise OutlookAutomationError(f"File name field failed: {file_name_result}")
+    confirm_point = _uia_control_point(
+        elements,
+        aliases=("Insert", "Open", "OK", "确定", "插入", "打开", "開啟"),
+        automation_ids=("1",),
+        control_types=("Button",),
+    )
+    if file_name_point is None:
+        raise OutlookAutomationError(
+            "File name input field was not found by deterministic UIA matching: "
+            f"{_element_summary(elements)}"
+        )
+    if confirm_point is None:
+        raise OutlookAutomationError(
+            "Attachment confirmation button was not found by deterministic UIA matching: "
+            f"{_element_summary(elements)}"
+        )
 
+    file_x, file_y = file_name_point
+    confirm_x, confirm_y = confirm_point
     input_actions = [
+        {
+            "tool": "click",
+            "args": {"on": f"{file_x},{file_y}", "window": dialog_title},
+        },
         {"tool": "hotkey", "args": {"keys": "Ctrl+A", "window": dialog_title}},
         {"tool": "type_text", "args": {"text": path, "window": dialog_title}},
+        {
+            "tool": "click",
+            "args": {"on": f"{confirm_x},{confirm_y}", "window": dialog_title},
+        },
     ]
     await run_actions(json.dumps(input_actions, ensure_ascii=False))
-
-    confirm_result = await find_and_click(
-        target="Insert/Open/OK/确定 confirmation button",
-        window=dialog_title,
-        detect_new_window=False,
-    )
-    if _looks_failed(confirm_result):
-        raise OutlookAutomationError(
-            f"Attachment dialog confirmation failed: {confirm_result}"
-        )
 
     closed = await _wait_until(
         lambda current: not any(
@@ -261,6 +273,108 @@ async def _submit_attachment_path(
         raise OutlookAutomationError(
             "Attachment dialog confirmation was clicked but the dialog is still open"
         )
+
+
+async def _click_uia_control(
+    window: str,
+    role: str,
+    aliases: tuple[str, ...],
+    automation_ids: tuple[str, ...],
+    control_types: tuple[str, ...],
+) -> None:
+    elements = _parse_elements(await list_elements(window=window))
+    point = _uia_control_point(
+        elements,
+        aliases=aliases,
+        automation_ids=automation_ids,
+        control_types=control_types,
+    )
+    if point is None:
+        raise OutlookAutomationError(
+            f"{role} was not found by deterministic UIA matching: "
+            f"{_element_summary(elements)}"
+        )
+    x, y = point
+    actions = [
+        {"tool": "click", "args": {"on": f"{x},{y}", "window": window}},
+        {"tool": "sleep", "args": {"seconds": 0.4}},
+    ]
+    await run_actions(json.dumps(actions, ensure_ascii=False))
+
+
+def _uia_control_point(
+    elements: list[dict[str, Any]],
+    aliases: tuple[str, ...],
+    automation_ids: tuple[str, ...],
+    control_types: tuple[str, ...],
+) -> Optional[tuple[int, int]]:
+    expected_ids = {
+        item.casefold(): 1100 - index * 10
+        for index, item in enumerate(automation_ids)
+    }
+    expected_types = {
+        item.casefold(): 50 - index
+        for index, item in enumerate(control_types)
+    }
+    normalized_aliases = {_normalize_ui_text(item) for item in aliases}
+    candidates = []
+    for element in elements:
+        if element.get("is_visible") is False or element.get("is_enabled") is False:
+            continue
+        point = _element_center(element)
+        if point is None:
+            continue
+        name = _normalize_ui_text(str(element.get("name") or ""))
+        automation_id = str(
+            element.get("automation_id") or element.get("automationId") or ""
+        ).casefold()
+        control_type = str(
+            element.get("control_type") or element.get("controlType") or ""
+        ).casefold().rsplit(".", 1)[-1]
+
+        score = 0
+        if automation_id and automation_id in expected_ids:
+            score = expected_ids[automation_id]
+        elif name and name in normalized_aliases:
+            score = 900
+        elif name and any(
+            alias in name or name in alias
+            for alias in normalized_aliases
+        ):
+            score = 700
+        if control_type in expected_types:
+            score += expected_types[control_type]
+        if score:
+            candidates.append((score, point))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if (
+        len(candidates) > 1
+        and candidates[0][0] == candidates[1][0]
+        and candidates[0][1] != candidates[1][1]
+    ):
+        return None
+    return candidates[0][1]
+
+
+def _normalize_ui_text(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _element_summary(elements: list[dict[str, Any]], limit: int = 20) -> str:
+    summary = []
+    for element in elements[:limit]:
+        summary.append({
+            "name": str(element.get("name") or "")[:80],
+            "automationId": str(
+                element.get("automation_id") or element.get("automationId") or ""
+            )[:80],
+            "controlType": str(
+                element.get("control_type") or element.get("controlType") or ""
+            )[:40],
+        })
+    return json.dumps(summary, ensure_ascii=False)
 
 
 @tool(description="在已确认的 Outlook 写信窗口使用 Alt+S 发送，并确认写信窗口已关闭。")
@@ -482,16 +596,6 @@ def _is_outlook_window(window: dict[str, Any]) -> bool:
 def _is_compose_window(window: dict[str, Any]) -> bool:
     title = _window_title(window).lower()
     return any(hint in title for hint in _COMPOSE_TITLE_HINTS)
-
-
-def _reported_new_window_title(result: str) -> Optional[str]:
-    match = re.search(r'检测到新窗口[^"“]*["“]([^"”]+)["”]', result)
-    return match.group(1).strip() if match else None
-
-
-def _looks_failed(result: str) -> bool:
-    normalized = str(result).lstrip()
-    return normalized.startswith(("❌", "错误", "失败")) or " 失败:" in normalized
 
 
 def _success(action: str, **data: Any) -> dict[str, Any]:
