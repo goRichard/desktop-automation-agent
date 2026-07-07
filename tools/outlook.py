@@ -181,6 +181,7 @@ async def outlook_add_attachments(
             raise OutlookAutomationError(f"Browse This PC failed: {result}")
 
         dialog_title = _reported_new_window_title(result)
+        print(f"dialog title {dialog_title}")
         if not dialog_title:
             dialog = await _wait_for_window(
                 lambda item: _window_key(item) not in before_keys,

@@ -1,15 +1,15 @@
 # Desktop Agent 配置文件
 # 修改 active_profile 切换模型，无需更改代码
 
-active_profile: azure
+active_profile: local
 
 profiles:
   local:                          # 内网 vLLM 部署
     models:
       chat:
         provider: openai_compatible
-        model: Qwen3.6-35B-A3B-FP8
-        baseUrl: https://llm-ai-model.apps.os.sewc.siemens.com/v1
+        model: Qwen3.6-35B-A3B
+        baseUrl: https://llm-deepseek-flash-ai-model.apps.os.sewc.siemens.com/v1
         apiKeyEnv: LLM_API_KEY    # 开发回退；Electron 将改用 Credential Manager
         temperature: 0.7
         maxTokens: 128000
@@ -19,8 +19,11 @@ profiles:
       vision:
         provider: openai_compatible
         model: Qwen3.6-35B-A3B
-        baseUrl: http://1759362599071661.cn-beijing.pai-eas.aliyuncs.com/api/predict/di_qwen3_5_35b/v1
+        baseUrl: https://llm-deepseek-flash-ai-model.apps.os.sewc.siemens.com/v1
         apiKeyEnv: VISION_API_KEY
+        tls:
+          verify: true
+          caBundle: ./siemens_ca_chain.pem
         capabilities:
           chat: true
           streaming: false
@@ -154,4 +157,5 @@ agent:
     - **等待操作**：UI 操作之间需要等待时，使用 `sleep(seconds=X)` 工具，不要调用不存在的 `wait()`。
 
 browser:
-  channel: msedge                   # MVP 优先使用系统 Microsoft Edge
+  # channel: msedge                   # MVP 优先使用系统 Microsoft Edge
+  channel: chrome
