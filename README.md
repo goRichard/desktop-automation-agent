@@ -20,7 +20,8 @@ CLI/Runtime API 启动、WinPeekaboo 原子操作验证、Outlook/Edge/Teams 验
 - Skill：支持版本化 YAML Schema、Markdown 兼容导入、生命周期管理和确定性步骤执行。
 - Classic Outlook：提供基于 WinPeekaboo 的应用 Adapter，确定性完成启动、写信、填写、
   附件和发送；附件使用 `Alt+N → A → F → Browse This PC`，并适配主题导致的写信窗口
-  标题变化。只有定位失败时才进入受限 Agent fallback。
+  标题变化。标准附件对话框完全使用 UIA，不调用 Chat/Vision 模型；只有 Adapter 整体失败
+  后才进入受限 Agent fallback。
 - 调度：通过 APScheduler 和 SQLite 持久化 Cron Task。
 - 历史：通过 SQLModel/SQLite 保存会话、消息、任务和执行日志。
 
@@ -320,7 +321,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 84 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 85 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

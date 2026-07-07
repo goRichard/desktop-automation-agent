@@ -44,6 +44,32 @@ def test_parse_elements_accepts_supported_winpeekaboo_wrappers(payload) -> None:
     assert elements == [{"name": "Subject", "control_type": "Edit"}]
 
 
+def test_file_dialog_uia_prefers_ordered_automation_id() -> None:
+    elements = [
+        {
+            "name": "File name:",
+            "control_type": "Edit",
+            "automation_id": "1001",
+            "bounds": {"x": 100, "y": 100, "width": 300, "height": 30},
+        },
+        {
+            "name": "File name:",
+            "control_type": "ComboBox",
+            "automation_id": "FileNameControlHost",
+            "bounds": {"x": 80, "y": 90, "width": 350, "height": 50},
+        },
+    ]
+
+    point = outlook._uia_control_point(
+        elements,
+        aliases=("File name",),
+        automation_ids=("FileNameControlHost", "1001"),
+        control_types=("Edit", "ComboBox"),
+    )
+
+    assert point == (255, 115)
+
+
 @pytest.mark.asyncio
 async def test_open_compose_uses_shortcut_and_returns_new_window(monkeypatch) -> None:
     main = _window(1, "Inbox - Outlook")
@@ -188,10 +214,10 @@ async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
     dialog_title = "Insert File"
     resolve_calls = []
     action_batches = []
-    click_calls = []
     activations = []
     snapshots = iter([
         [_window(2, compose_title)],
+        [_window(2, compose_title), _window(3, dialog_title, "OUTLOOK.EXE")],
         [_window(2, compose_title), _window(3, dialog_title, "OUTLOOK.EXE")],
         [_window(2, compose_title)],
     ])
@@ -211,20 +237,33 @@ async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
     async def fake_list_records():
         return next(snapshots)
 
-    async def fake_find_and_click(target, window=None, **kwargs):
-        click_calls.append((target, window, kwargs))
-        if target == "Browse This PC":
-            return (
-                "✅ clicked\n"
-                f'检测到新窗口已弹出，已自动激活: "{dialog_title}"'
-            )
-        return "✅ clicked"
+    async def fake_list_elements(window):
+        if window == compose_title:
+            return json.dumps([{
+                "name": "Browse This PC",
+                "control_type": "MenuItem",
+                "bounds": {"x": 100, "y": 120, "width": 180, "height": 30},
+            }])
+        return json.dumps([
+            {
+                "name": "File name:",
+                "control_type": "Edit",
+                "automation_id": "FileNameControlHost",
+                "bounds": {"x": 200, "y": 400, "width": 500, "height": 30},
+            },
+            {
+                "name": "Insert",
+                "control_type": "Button",
+                "automation_id": "1",
+                "bounds": {"x": 720, "y": 400, "width": 90, "height": 30},
+            },
+        ])
 
     monkeypatch.setattr(outlook, "_resolve_compose_window_title", fake_resolve)
     monkeypatch.setattr(outlook, "window_activate", fake_activate)
     monkeypatch.setattr(outlook, "run_actions", fake_run_actions)
     monkeypatch.setattr(outlook, "_list_window_records", fake_list_records)
-    monkeypatch.setattr(outlook, "find_and_click", fake_find_and_click)
+    monkeypatch.setattr(outlook, "list_elements", fake_list_elements)
 
     result = await outlook.outlook_add_attachments(
         window="Untitled - Message (HTML)",
@@ -242,20 +281,19 @@ async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
         for action in menu_actions
         if action["tool"] == "press_key"
     ] == ["A", "F"]
-    assert click_calls == [
-        (
-            "Browse This PC",
-            compose_title,
-            {"new_window_timeout_seconds": 1},
-        ),
-        ("File name input field", dialog_title, {"detect_new_window": False}),
-        (
-            "Insert/Open/OK/确定 confirmation button",
-            dialog_title,
-            {"detect_new_window": False},
-        ),
-    ]
-    assert action_batches[1][-1]["args"]["text"] == str(attachment.resolve())
+    assert action_batches[1][0] == {
+        "tool": "click",
+        "args": {"on": "190,135", "window": compose_title},
+    }
+    assert action_batches[2][0] == {
+        "tool": "click",
+        "args": {"on": "450,415", "window": dialog_title},
+    }
+    assert action_batches[2][-1] == {
+        "tool": "click",
+        "args": {"on": "765,415", "window": dialog_title},
+    }
+    assert action_batches[2][2]["args"]["text"] == str(attachment.resolve())
     assert resolve_calls[0] == "Untitled - Message (HTML)"
     assert result["data"]["windowTitle"] == compose_title
     assert activations[-1] == compose_title
