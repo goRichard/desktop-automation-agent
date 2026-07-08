@@ -13,7 +13,7 @@ from agent.loop import (
     _verification_target_window,
     _verification_wait_seconds,
 )
-from llm import ToolCall
+from llm import ToolCall, VisionUnavailableError
 
 
 def test_verification_prefers_new_window_reported_by_tool() -> None:
@@ -200,6 +200,25 @@ def test_window_transition_uses_longer_stabilization_delay() -> None:
     assert _verification_wait_seconds([
         ToolCall("type", "type_text", {"text": "hello"})
     ]) == 0.5
+
+
+@pytest.mark.asyncio
+async def test_verification_degrades_when_vision_model_rejects_images(monkeypatch) -> None:
+    async def fake_visual_verify(*args, **kwargs):
+        raise VisionUnavailableError("configured model rejected image input")
+
+    async def no_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("tools.vision._visual_verify", fake_visual_verify)
+    monkeypatch.setattr("tools.vision.asyncio.sleep", no_sleep)
+
+    from tools.vision import verify_action_result
+
+    result = await verify_action_result("窗口已经打开", wait_seconds=0)
+
+    assert result.startswith("⚠️ 无法确定：Vision 模型不可用")
+    assert "BadRequest" not in result
 
 
 @pytest.mark.asyncio

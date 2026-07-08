@@ -28,7 +28,7 @@ profiles:
           chat: true
           streaming: false
           toolCalling: false
-          vision: true
+          vision: false
           jsonOutput: false
 
   cloud:                          # 云端 OpenAI

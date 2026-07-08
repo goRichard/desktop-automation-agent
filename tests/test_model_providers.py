@@ -10,7 +10,7 @@ import yaml
 
 from config.settings import Settings
 from config.model_provider import ModelProviderConfig, ProviderType, TLSConfig
-from llm import LLMClient, TokenUsage, capture_token_usage
+from llm import LLMClient, TokenUsage, VisionUnavailableError, capture_token_usage
 from llm.providers import OpenAIProvider, _sanitize_error
 
 
@@ -175,3 +175,41 @@ async def test_llm_client_reports_usage_to_active_run_context() -> None:
     assert response.usage.total_tokens == 15
     assert len(recorded) == 1
     assert recorded[0].input_tokens == 12
+
+
+@pytest.mark.asyncio
+async def test_vision_caches_text_only_provider_rejection(tmp_path) -> None:
+    from PIL import Image
+
+    config = ModelProviderConfig(
+        provider="openai_compatible",
+        model="text-only-model",
+        baseUrl="http://127.0.0.1:1/v1",
+        capabilities={"vision": True},
+    )
+
+    class FakeProvider:
+        def __init__(self):
+            self.config = config
+            self.calls = 0
+
+        async def complete(self, **kwargs):
+            self.calls += 1
+            raise RuntimeError(
+                "Error code: 400 - at most 0 images may be provided in one prompt"
+            )
+
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (1, 1)).save(image_path)
+    provider = FakeProvider()
+    client = LLMClient.__new__(LLMClient)
+    client.chat_provider = provider
+    client.vision_provider = provider
+    client._vision_unavailable_reason = None
+
+    with pytest.raises(VisionUnavailableError, match="rejected image input"):
+        await client.vision(str(image_path), "inspect")
+    with pytest.raises(VisionUnavailableError, match="rejected image input"):
+        await client.vision(str(image_path), "inspect again")
+
+    assert provider.calls == 1

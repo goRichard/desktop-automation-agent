@@ -3,6 +3,7 @@ from .client import (
     LLMResponse,
     ProviderCapabilityError,
     ToolCall,
+    VisionUnavailableError,
     get_llm_client,
     reset_llm_client,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "ToolCall",
     "ModelProvider",
     "ProviderCapabilityError",
+    "VisionUnavailableError",
     "TokenUsage",
     "capture_token_usage",
     "create_provider",

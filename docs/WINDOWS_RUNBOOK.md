@@ -179,6 +179,24 @@ chat:
     caBundle: ./internal-ca.pem
 ```
 
+Chat 与 Vision 是两个独立角色。vLLM 上的纯文本模型只应配置为 `chat`；`vision` 必须指向
+实际支持图片输入的多模态模型，并显式声明能力：
+
+```yaml
+vision:
+  provider: openai_compatible
+  model: your-multimodal-model
+  baseUrl: https://internal-model.example.com/v1
+  apiKeyEnv: LLM_API_KEY
+  capabilities:
+    vision: true
+```
+
+启动执行前可调用 `POST /models/vision/health?probe=vision` 做真实图片探测。若返回
+`at most 0 images may be provided in one prompt`，说明当前 vLLM 部署不接受图片，而不是
+截图数量过多。Runtime 在首次识别该错误后会缓存不可用状态，后续验证降级为提示；修改
+模型配置后客户端会重建并重新探测。
+
 `caBundle` 可以使用绝对路径，也可以使用相对于 `config.yaml` 的路径。CA 文件必须是
 PEM 证书链，不得包含私钥。文件不存在或配置的 SHA-256 指纹不匹配时，Runtime 会拒绝
 加载配置。
@@ -198,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-88 passed
+90 passed
 ```
 
 测试覆盖：

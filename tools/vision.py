@@ -11,7 +11,7 @@ import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from llm import get_llm_client
+from llm import ProviderCapabilityError, get_llm_client
 from .registry import tool
 from .uia import normalize_element_records
 from .winpeekaboo import (
@@ -44,9 +44,10 @@ async def _visual_verify(
     截图并用多模态模型分析的公共底层逻辑。
     供 analyze_screen 和 verify_action_result 内部调用。
     """
+    client = get_llm_client()
+    client.ensure_vision_available()
     tmp_path = _screenshot_path(screenshot_name)
     await capture_image(output=tmp_path, window=window, region=region)
-    client = get_llm_client()
     return await client.vision(image_path=tmp_path, prompt=prompt)
 
 
@@ -1055,5 +1056,7 @@ async def verify_action_result(
         result = await _visual_verify(prompt, window=target_window, screenshot_name="verify")
         return result.strip()
 
+    except ProviderCapabilityError as e:
+        return f"⚠️ 无法确定：Vision 模型不可用：{e}"
     except Exception as e:
         return f"⚠️ 验证过程出错: {type(e).__name__}: {e}"

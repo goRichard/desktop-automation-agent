@@ -92,6 +92,11 @@ profiles:
           caBundle: ./internal-ca.pem
 ```
 
+Vision 角色必须配置实际支持图片输入的多模态模型。文本模型可以用于 Chat，但不能因为
+它提供 OpenAI-compatible 接口就同时用于 Vision。若服务返回 `at most 0 images`，Runtime
+会把该 Vision Provider 标记为不可用，后续检查直接降级为 `⚠️ 无法确定`，避免重复请求。
+可通过 `POST /models/vision/health?probe=vision` 主动验证图片输入能力。
+
 CA 文件不存在或指纹不匹配时配置加载失败，不会静默降级到系统证书。`apiKeyEnv` 仅作为
 当前开发阶段的密钥来源；Electron 版本将通过 Windows Credential Manager/safeStorage
 解析 `apiKeySecret`，密钥不会由 `/models` 接口返回。

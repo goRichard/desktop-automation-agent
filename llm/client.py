@@ -55,6 +55,25 @@ class ProviderCapabilityError(RuntimeError):
     pass
 
 
+class VisionUnavailableError(ProviderCapabilityError):
+    """The configured Vision provider cannot accept image input at runtime."""
+
+
+def _is_unsupported_image_error(error: Exception) -> bool:
+    """Recognize common OpenAI-compatible errors for text-only deployments."""
+    message = str(error).casefold()
+    markers = (
+        "at most 0 images",
+        "image input is not supported",
+        "image inputs are not supported",
+        "does not support image input",
+        "doesn't support image input",
+        "vision is not supported",
+        "multimodal input is not supported",
+    )
+    return any(marker in message for marker in markers)
+
+
 class LLMClient:
     """
     多后端 LLM 客户端，自动适配：
@@ -74,6 +93,7 @@ class LLMClient:
         self._settings = get_settings()
         self.chat_provider = chat_provider or create_provider(self._settings.chat_model)
         self.vision_provider = vision_provider or create_provider(self._settings.vision_model)
+        self._vision_unavailable_reason: Optional[str] = None
 
     async def chat(
         self,
@@ -163,25 +183,39 @@ class LLMClient:
         text = await self._call_vision(b64, mime, prompt)
         return text, scale_x, scale_y
 
+    def ensure_vision_available(self) -> None:
+        """Fail before screenshot work when Vision is disabled or rejected at runtime."""
+        self._require_vision()
+
     async def _call_vision(self, b64: str, mime: str, prompt: str) -> str:
         """底层调用视觉模型"""
         cfg = self.vision_provider.config
 
-        response: ChatCompletion = await self.vision_provider.complete(
-            model=cfg.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
-        )
+        try:
+            response: ChatCompletion = await self.vision_provider.complete(
+                model=cfg.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+            )
+        except Exception as error:
+            if not _is_unsupported_image_error(error):
+                raise
+            reason = (
+                f"Provider {cfg.provider.value}/{cfg.model} rejected image input; "
+                "configure a multimodal model for the Vision role"
+            )
+            self._vision_unavailable_reason = reason
+            raise VisionUnavailableError(reason) from error
         await report_token_usage(TokenUsage.from_sdk(
             response.usage,
             role=ModelRole.VISION.value,
@@ -195,6 +229,9 @@ class LLMClient:
             raise ProviderCapabilityError(
                 f"Provider {cfg.provider.value}/{cfg.model} does not declare vision support"
             )
+        reason = getattr(self, "_vision_unavailable_reason", None)
+        if reason:
+            raise VisionUnavailableError(reason)
 
     def public_config(self) -> dict[str, dict]:
         return {
