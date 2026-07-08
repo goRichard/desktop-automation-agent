@@ -218,6 +218,8 @@ class SkillExecutor:
                 raise SkillExecutionError(f"User rejected Skill step: {step.id}")
             return
         if step.risk in {"high", "external_side_effect"}:
+            if step.policy and not step.policy.require_confirmation:
+                return
             if context["approvals"].get("external_side_effect"):
                 context["approvals"]["external_side_effect"] = False
                 return

@@ -216,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-92 passed
+93 passed
 ```
 
 测试覆盖：
@@ -433,17 +433,17 @@ python -m winpeekaboo list elements --window "<Outlook 主窗口标题>" --json
 - 能发现 Outlook 主窗口。
 - UIA 列表中能看到部分邮件视图控件。
 
-首轮测试不要发送真实邮件。后续邮件流程使用专用测试邮箱，先测试“新建并填写草稿但不发送”，
-确认收件人、主题、正文和窗口切换无误后，再单独审批发送测试。
+首轮测试不要使用真实收件人。发送邮件 Skill 不再暂停等待人工确认，因此只能使用专用测试
+邮箱做端到端验收；只测试草稿填写时不要启动该 Skill。
 
 ### W03b：Classic Outlook 确定性 Skill
 
 Runtime 启动时会从 `skills\user_skills\send_outlook_email.skill.yaml` 导入
-`send-email@2.0.0`。常规执行路径依次调用 Outlook Adapter，不经过 Agent Loop：
+`send-email@2.0.1`。常规执行路径依次调用 Outlook Adapter，不经过 Agent Loop：
 
 ```text
 launch -> ensureMailView -> openCompose -> resolveCompose -> fillMessage
-       -> addAttachments -> user.confirm -> send
+       -> addAttachments -> resolveCompose -> send
 ```
 
 先确认 Skill 已导入，然后将 draft 验证为 validated。此时可以执行 guided 测试，但暂时
@@ -453,7 +453,7 @@ launch -> ensureMailView -> openCompose -> resolveCompose -> fillMessage
 Invoke-RestMethod "$baseUrl/skills/send-email" -Headers $headers
 
 Invoke-RestMethod `
-  "$baseUrl/skills/send-email/versions/2.0.0/validate" `
+  "$baseUrl/skills/send-email/versions/2.0.1/validate" `
   -Method Post -Headers $headers
 ```
 
@@ -462,7 +462,7 @@ Invoke-RestMethod `
 ```powershell
 $runBody = @{
   skillId = "send-email"
-  skillVersion = "2.0.0"
+  skillVersion = "2.0.1"
   mode = "guided"
   inputs = @{
     recipient = "your-test-mailbox@example.com"
@@ -483,8 +483,8 @@ do {
 $state | ConvertTo-Json -Depth 8
 ```
 
-此时预期状态为 `waiting_user`，Outlook 写信窗口中的收件人、主题和正文已经填写，但邮件
-尚未发送。先检查：
+该 Skill 不包含 `user.confirm`，guided 模式也不会进入 `waiting_user`。Run 应直接完成并
+发送到专用测试邮箱，然后检查：
 
 - `token_usage.model_calls` 为 `0`，表示常规 Adapter 路径没有调用模型。
 - `execution_memory` 中依次出现 `outlook_launch_classic`、
@@ -492,31 +492,7 @@ $state | ConvertTo-Json -Depth 8
   `outlook_fill_message` 和 `outlook_add_attachments`。
 - 收件人、主题、正文准确，光标和窗口没有发生重复跳转。
 
-不发送邮件时取消 Run：
-
-```powershell
-$cancelBody = @{ reason = "Draft-only smoke test completed" } | ConvertTo-Json
-Invoke-RestMethod "$baseUrl/runs/$($run.id)/cancel" `
-  -Method Post -Headers $headers -ContentType "application/json" -Body $cancelBody
-```
-
-发送验收必须改用专用测试邮箱，重新创建 Run，并在 `waiting_user` 后显式批准：
-
-```powershell
-$run = Invoke-RestMethod "$baseUrl/runs" `
-  -Method Post -Headers $headers -ContentType "application/json" -Body $runBody
-
-do {
-  Start-Sleep -Seconds 1
-  $state = Invoke-RestMethod "$baseUrl/runs/$($run.id)" -Headers $headers
-} while ($state.status -in @("queued", "preparing", "running"))
-
-$confirmBody = @{ approved = $true } | ConvertTo-Json
-Invoke-RestMethod "$baseUrl/runs/$($run.id)/confirm" `
-  -Method Post -Headers $headers -ContentType "application/json" -Body $confirmBody
-```
-
-批准后 Adapter 先激活最新 HWND 对应的写信窗口，等待焦点稳定，再向当前前台窗口发送
+Adapter 先激活最新 HWND 对应的写信窗口，等待焦点稳定，再向当前前台窗口发送
 不带窗口标题参数的 `Alt+S`，并以写信窗口关闭作为成功条件。这样避免 WinPeekaboo 在按键
 注入前按标题重复连接/激活窗口所造成的焦点竞争。发送步骤没有 Agent
 fallback：如果发送结果不明确，Run 会失败并保留证据，不会由模型再次点击 Send。
@@ -528,14 +504,14 @@ Windows 实机验证通过后，才发布该版本：
 后写信窗口标题通常会变为 `<Subject> - Message (HTML)`；Adapter 必须在每个附件前重新
 解析当前写信窗口，不得继续使用 `Untitled - Message (HTML)`。Adapter 从创建邮件时记录
 写信窗口 HWND；即使 WinPeekaboo 后续只返回 Subject 作为标题，也按 HWND 获取当前标题。
-Skill 会在用户确认后、实际发送前再次调用 `outlook.resolveCompose`。
+Skill 会在实际发送前再次调用 `outlook.resolveCompose`。
 `Browse This PC` 仍使用 UIA 名称、AutomationId 和 ControlType 确定性匹配；文件对话框
 依靠前台键盘操作，不产生模型调用，也不扫描其 UIA 元素。临时菜单首次返回空 UIA 输出时
 会自动重试；解析器兼容 UTF-8 BOM 和日志前缀。
 
 ```powershell
 Invoke-RestMethod `
-  "$baseUrl/skills/send-email/versions/2.0.0/publish" `
+  "$baseUrl/skills/send-email/versions/2.0.1/publish" `
   -Method Post -Headers $headers
 ```
 

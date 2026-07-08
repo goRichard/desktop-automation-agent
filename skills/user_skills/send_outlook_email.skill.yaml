@@ -4,7 +4,7 @@ kind: Skill
 metadata:
   id: send-email
   name: send_email
-  version: 2.0.0
+  version: 2.0.1
   status: draft
   description: 使用 Classic Outlook 确定性地填写并发送电子邮件
   tags: [outlook, email, windows]
@@ -146,13 +146,6 @@ execution:
           - ui.wait
       onFailure: stop
 
-    - id: confirm-send
-      name: 确认发送邮件
-      action: user.confirm
-      risk: external_side_effect
-      policy:
-        skipWhen: unattendedApproved
-
     - id: resolve-compose-before-send
       name: 发送前刷新 Outlook 写信窗口标题
       action: outlook.resolveCompose
@@ -169,4 +162,6 @@ execution:
       with:
         timeout_seconds: 8
       risk: external_side_effect
+      policy:
+        requireConfirmation: false
       onFailure: stop

@@ -105,7 +105,7 @@ def test_outlook_skill_is_structured_and_bounded() -> None:
     assert parsed.document is not None
     document = parsed.document
     assert document.metadata.id == "send-email"
-    assert document.metadata.version == "2.0.0"
+    assert document.metadata.version == "2.0.1"
     assert [step.action for step in document.execution.steps] == [
         "outlook.launch",
         "outlook.ensureMailView",
@@ -113,7 +113,6 @@ def test_outlook_skill_is_structured_and_bounded() -> None:
         "outlook.resolveCompose",
         "outlook.fillMessage",
         "outlook.addAttachments",
-        "user.confirm",
         "outlook.resolveCompose",
         "outlook.send",
     ]
@@ -125,6 +124,7 @@ def test_outlook_skill_is_structured_and_bounded() -> None:
     ]
     assert document.execution.steps[-1].fallback is None
     assert document.execution.steps[-1].risk == "external_side_effect"
+    assert document.execution.steps[-1].policy.require_confirmation is False
 
 
 @pytest.mark.asyncio
@@ -171,13 +171,9 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
     async def reject_agent(*_):
         raise AssertionError("Deterministic Outlook path must not call the Agent")
 
-    async def confirm(_):
-        return True
-
     monkeypatch.setattr("skills.executor.get_tool", fake_get_tool)
     result = await SkillExecutor(
         agent_runner=reject_agent,
-        confirmation_runner=confirm,
     ).execute(
         document,
         {
@@ -210,6 +206,32 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
     assert calls[5][1]["paths"] == []
     assert calls[-2][1] == {}
     assert calls[-1][1]["window"] == "Status - Message (HTML)"
+
+
+@pytest.mark.asyncio
+async def test_email_send_policy_skips_guided_confirmation(monkeypatch) -> None:
+    value = skill_value()
+    value["execution"]["steps"] = [{
+        "id": "send",
+        "name": "Send",
+        "action": "ui.click",
+        "risk": "external_side_effect",
+        "policy": {"requireConfirmation": False},
+    }]
+    confirmations = []
+
+    async def confirm(details):
+        confirmations.append(details)
+        return True
+
+    monkeypatch.setattr("skills.executor.get_tool", lambda _: lambda **__: "sent")
+    result = await SkillExecutor(confirmation_runner=confirm).execute(
+        SkillDocument.model_validate(value),
+        {"recipient": "person@example.com"},
+    )
+
+    assert result["success"] is True
+    assert confirmations == []
 
 
 @pytest.mark.asyncio

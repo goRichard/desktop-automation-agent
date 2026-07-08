@@ -90,6 +90,7 @@ class StepPolicy(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     skip_when: Optional[str] = Field(default=None, alias="skipWhen")
+    require_confirmation: bool = Field(default=True, alias="requireConfirmation")
 
 
 class SkillStep(BaseModel):
