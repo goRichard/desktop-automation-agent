@@ -17,6 +17,11 @@ def _window(hwnd: int, title: str, process: str = "OUTLOOK.EXE") -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def reset_compose_window_identity(monkeypatch) -> None:
+    monkeypatch.setattr(outlook, "_last_compose_window_key", None)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -217,6 +222,41 @@ async def test_send_waits_for_compose_window_to_close(monkeypatch) -> None:
     assert result["data"]["windowClosed"] is True
     assert result["data"]["windowTitle"] == "Status - Message (HTML)"
     assert shortcuts == [("Alt+S", "Status - Message (HTML)")]
+
+
+@pytest.mark.asyncio
+async def test_send_tracks_compose_by_handle_when_title_is_subject_only(monkeypatch) -> None:
+    compose = _window(2, "Quarterly Status")
+    main = _window(1, "Inbox - Outlook")
+    snapshots = iter([[compose, main], [main]])
+    activations = []
+    shortcuts = []
+    outlook._last_compose_window_key = "2"
+
+    async def fake_list_windows():
+        return json.dumps(next(snapshots))
+
+    async def fake_activate(title):
+        activations.append(title)
+        return "ok"
+
+    async def fake_hotkey(keys, window=None):
+        shortcuts.append((keys, window))
+        return "ok"
+
+    monkeypatch.setattr(outlook, "list_windows", fake_list_windows)
+    monkeypatch.setattr(outlook, "window_activate", fake_activate)
+    monkeypatch.setattr(outlook, "hotkey", fake_hotkey)
+
+    result = await outlook.outlook_send_message(
+        window="Untitled - Message (HTML)",
+        timeout_seconds=1,
+    )
+
+    assert result["data"]["windowTitle"] == "Quarterly Status"
+    assert activations == ["Quarterly Status"]
+    assert shortcuts == [("Alt+S", "Quarterly Status")]
+    assert outlook._last_compose_window_key is None
 
 
 @pytest.mark.asyncio

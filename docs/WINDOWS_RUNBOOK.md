@@ -216,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-90 passed
+91 passed
 ```
 
 测试覆盖：
@@ -524,7 +524,9 @@ Windows 实机验证通过后，才发布该版本：
 弹出后保持前台焦点，不再要求 WinPeekaboo 按 `Insert File` 标题重新连接：使用 `Alt+N`
 聚焦 `File name`，写入附件绝对路径并按 Enter 触发默认 Insert/Open 按钮。输入 Subject
 后写信窗口标题通常会变为 `<Subject> - Message (HTML)`；Adapter 必须在每个附件前重新
-解析当前写信窗口，不得继续使用 `Untitled - Message (HTML)`。
+解析当前写信窗口，不得继续使用 `Untitled - Message (HTML)`。Adapter 从创建邮件时记录
+写信窗口 HWND；即使 WinPeekaboo 后续只返回 Subject 作为标题，也按 HWND 获取当前标题。
+Skill 会在用户确认后、实际发送前再次调用 `outlook.resolveCompose`。
 `Browse This PC` 仍使用 UIA 名称、AutomationId 和 ControlType 确定性匹配；文件对话框
 依靠前台键盘操作，不产生模型调用，也不扫描其 UIA 元素。临时菜单首次返回空 UIA 输出时
 会自动重试；解析器兼容 UTF-8 BOM 和日志前缀。

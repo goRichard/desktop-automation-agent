@@ -39,6 +39,10 @@ _FIELD_ALIASES = {
     "body": ("message", "body", "邮件正文", "正文"),
 }
 
+# A compose window changes title after Subject is entered. Keep its stable HWND
+# so later adapter calls do not depend on title text containing "Message".
+_last_compose_window_key: Optional[str] = None
+
 
 @tool(description="启动 Classic Outlook (outlook.exe)，返回检测到的 Outlook 主窗口标题。")
 async def outlook_launch_classic() -> dict[str, Any]:
@@ -82,6 +86,7 @@ async def outlook_open_compose(
     )
     if compose is None:
         raise OutlookAutomationError("New Outlook compose window did not appear after Ctrl+N")
+    _remember_compose_window(compose)
     title = _window_title(compose)
     await window_activate(title)
     return _success("open_compose", windowTitle=title, shortcut="Ctrl+N")
@@ -398,6 +403,8 @@ async def outlook_send_message(
         raise OutlookAutomationError(
             "Send shortcut was issued but the compose window is still open"
         )
+    global _last_compose_window_key
+    _last_compose_window_key = None
     return _success("send", windowTitle=window, shortcut="Alt+S", windowClosed=True)
 
 
@@ -422,6 +429,14 @@ def _select_compose_window_title(
     records: list[dict[str, Any]],
     preferred: Optional[str] = None,
 ) -> str:
+    if _last_compose_window_key:
+        remembered = [
+            item for item in records
+            if _window_key(item) == _last_compose_window_key
+        ]
+        if remembered:
+            return _window_title(remembered[0])
+
     candidates = [
         item
         for item in records
@@ -434,11 +449,19 @@ def _select_compose_window_title(
             if _window_title(item).lower() == preferred.lower()
         ]
         if exact:
+            _remember_compose_window(exact[0])
             return _window_title(exact[0])
     if not candidates:
         detail = f" (previous title: {preferred})" if preferred else ""
         raise OutlookAutomationError(f"Classic Outlook compose window was not found{detail}")
-    return _window_title(max(candidates, key=_window_priority))
+    selected = max(candidates, key=_window_priority)
+    _remember_compose_window(selected)
+    return _window_title(selected)
+
+
+def _remember_compose_window(window: dict[str, Any]) -> None:
+    global _last_compose_window_key
+    _last_compose_window_key = _window_key(window)
 
 
 async def _wait_for_window(predicate, timeout_seconds: float) -> Optional[dict[str, Any]]:

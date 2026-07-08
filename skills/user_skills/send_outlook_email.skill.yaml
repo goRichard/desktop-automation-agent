@@ -153,11 +153,19 @@ execution:
       policy:
         skipWhen: unattendedApproved
 
+    - id: resolve-compose-before-send
+      name: 发送前刷新 Outlook 写信窗口标题
+      action: outlook.resolveCompose
+      retry:
+        maxAttempts: 3
+        delaySeconds: 1
+      onFailure: stop
+
     - id: send-message
       name: 使用 Alt+S 发送邮件
       action: outlook.send
       target:
-        window: "{{ steps.resolve-compose.output.data.windowTitle }}"
+        window: "{{ steps.resolve-compose-before-send.output.data.windowTitle }}"
       with:
         timeout_seconds: 8
       risk: external_side_effect

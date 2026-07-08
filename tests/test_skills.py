@@ -114,6 +114,7 @@ def test_outlook_skill_is_structured_and_bounded() -> None:
         "outlook.fillMessage",
         "outlook.addAttachments",
         "user.confirm",
+        "outlook.resolveCompose",
         "outlook.send",
     ]
     assert document.execution.steps[2].fallback.allowed_tools == [
@@ -137,6 +138,10 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
     document = SkillDocument.from_yaml(skill_path.read_text(encoding="utf-8"))
     calls: list[tuple[str, dict]] = []
 
+    resolve_titles = iter([
+        "Untitled - Message (HTML)",
+        "Status - Message (HTML)",
+    ])
     outputs = {
         "outlook_launch_classic": {
             "ok": True,
@@ -148,16 +153,17 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
             "data": {"windowTitle": "Untitled - Message (HTML)"},
             "error": None,
         },
-        "outlook_resolve_compose": {
-            "ok": True,
-            "data": {"windowTitle": "Untitled - Message (HTML)"},
-            "error": None,
-        },
     }
 
     def fake_get_tool(name: str):
         async def invoke(**parameters):
             calls.append((name, parameters))
+            if name == "outlook_resolve_compose":
+                return {
+                    "ok": True,
+                    "data": {"windowTitle": next(resolve_titles)},
+                    "error": None,
+                }
             return outputs.get(name, {"ok": True, "data": {}, "error": None})
 
         return invoke
@@ -189,6 +195,7 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
         "outlook_resolve_compose",
         "outlook_fill_message",
         "outlook_add_attachments",
+        "outlook_resolve_compose",
         "outlook_send_message",
     ]
     assert calls[1][1]["window"] == "Inbox - Outlook"
@@ -201,7 +208,8 @@ async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None
         "body": "Hello",
     }
     assert calls[5][1]["paths"] == []
-    assert calls[-1][1]["window"] == "Untitled - Message (HTML)"
+    assert calls[-2][1] == {}
+    assert calls[-1][1]["window"] == "Status - Message (HTML)"
 
 
 @pytest.mark.asyncio
