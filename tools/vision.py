@@ -7,9 +7,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import unicodedata
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from llm import ProviderCapabilityError, get_llm_client
 from .registry import tool
@@ -198,6 +199,20 @@ _INTERACTIVE_TYPES = {
     "DataItem", "Header", "HeaderItem", "ToolBar",
 }
 _NAMED_STRUCTURAL_TYPES = {"Pane", "Text", "Group"}
+_UIA_CACHE_TTL_SECONDS = 2.0
+_uia_cache: dict[str, tuple[float, List[Dict]]] = {}
+_uia_scan_metrics: dict[str, dict[str, Any]] = {}
+
+
+def invalidate_uia_cache(window: Optional[str] = None) -> None:
+    """Invalidate cached UIA records after any desktop mutation."""
+    if window is None:
+        _uia_cache.clear()
+        _uia_scan_metrics.clear()
+        return
+    cache_key = window.casefold()
+    _uia_cache.pop(cache_key, None)
+    _uia_scan_metrics.pop(cache_key, None)
 
 
 async def _get_interactive_elements(window: Optional[str]) -> List[Dict]:
@@ -206,16 +221,21 @@ async def _get_interactive_elements(window: Optional[str]) -> List[Dict]:
     返回 list of {name, control_type, automation_id, bounds, center}。
     UIA 扫描前必须先激活窗口，否则元素树可能不完整。
     """
-    # 1. 激活窗口前置（UIA 扫描之前）
-    if window:
-        try:
-            await window_activate(window)
-            await asyncio.sleep(0.4)
-        except Exception:
-            pass
-
     if not window:
         return []
+
+    cache_key = window.casefold()
+    cached = _uia_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] <= _UIA_CACHE_TTL_SECONDS:
+        _uia_scan_metrics.setdefault(cache_key, {})["cache_hit"] = True
+        return cached[1]
+
+    # 1. 激活窗口前置（UIA 扫描之前）
+    try:
+        await window_activate(window)
+        await asyncio.sleep(0.4)
+    except Exception:
+        pass
 
     # 2. 统一通过 WinPeekaboo CLI 扫描和规范化
     try:
@@ -242,6 +262,12 @@ async def _get_interactive_elements(window: Optional[str]) -> List[Dict]:
             ):
                 continue
             result.append(e)
+        _uia_cache[cache_key] = (time.monotonic(), result)
+        _uia_scan_metrics[cache_key] = {
+            "raw": len(elements),
+            "interactive": len(result),
+            "cache_hit": False,
+        }
         return result
     except Exception:
         return []
@@ -259,7 +285,7 @@ async def _llm_select_element(
         return None
 
     ranked = _rank_element_candidates(elements, query)
-    candidates = [element for _, element in ranked[:60]]
+    candidates = [element for _, element in ranked[:12]]
     if not candidates:
         return None
 
@@ -305,7 +331,13 @@ async def _llm_select_element(
     try:
         response = await client.chat(messages)
         result = (response.content or "").strip().strip("`\"'")
-        return by_key.get(result)
+        selected = by_key.get(result)
+        if selected:
+            return {
+                **selected,
+                "_semantic_candidate_count": len(candidates),
+            }
+        return None
     except Exception:
         return None
 
@@ -436,7 +468,7 @@ async def _locate_element(
         if elements:
             matched = _match_by_automation_id(elements, automation_id)
             if matched:
-                return {**matched, "source": "UIA"}
+                return {**matched, "source": "UIA", "_match_stage": "automation_id"}
         # 显式 automation_id 是严格确定性约束，未命中时禁止静默改用视觉坐标。
         return None
 
@@ -448,13 +480,13 @@ async def _locate_element(
         # 先尝试 automation_id + name 快速匹配（不含 LLM），命中则直接返回
         fast_matched = _simple_match_element(elements, target)
         if fast_matched:
-            return {**fast_matched, "source": "UIA"}
+            return {**fast_matched, "source": "UIA", "_match_stage": "deterministic"}
 
     # ── Stage 2: LLM 语义匹配 ─────────────────────────────
     if elements:
         matched = await _llm_select_element(elements, target)
         if matched:
-            return {**matched, "source": "UIA"}
+            return {**matched, "source": "UIA", "_match_stage": "semantic"}
 
     # ── Stage 3: VLM 视觉兜底 ───────────────────────────────
     tmp_path = await _capture_for_coordinates(window, "locate")
@@ -481,6 +513,7 @@ async def _locate_element(
         "bounds": {"x": cx - 10, "y": cy - 10, "width": 20, "height": 20},
         "center": (cx, cy),
         "source": "VLM",
+        "_match_stage": "vision",
     }
 
 
@@ -624,6 +657,40 @@ def _scale_vision_point(
 # ══════════════════════════════════════════════════════
 # 定位类工具：定位 UI 元素位置（不点击）
 # ══════════════════════════════════════════════════════
+
+@tool(description="压缩检查指定窗口的可交互 UIA 元素。仅返回最多 30 个候选的 key、name、control type 和 automation id，不返回完整 UIA JSON。通常应直接使用 find_and_click；只有目标名称或 automation_id 不明确时才调用本工具。query 可选，用于在本地优先排序候选；limit 默认 20。")
+async def inspect_elements(
+    window: str,
+    query: Optional[str] = None,
+    limit: int = 20,
+) -> str:
+    elements = await _get_interactive_elements(window)
+    bounded_limit = max(1, min(int(limit), 30))
+    if query:
+        elements = [element for _, element in _rank_element_candidates(elements, query)]
+    candidates = elements[:bounded_limit]
+    lines = []
+    for element in candidates:
+        key = str(element.get("element_key") or "")
+        name = str(element.get("name") or "").replace("\r", " ").replace("\n", " ")[:120]
+        control_type = str(element.get("control_type") or "Unknown")
+        automation_id = str(element.get("automation_id") or "")[:120]
+        line = f"[{key}] name={json.dumps(name, ensure_ascii=False)} type={control_type}"
+        if automation_id:
+            line += f" id={json.dumps(automation_id, ensure_ascii=False)}"
+        lines.append(line)
+
+    metrics = _uia_scan_metrics.get(window.casefold(), {})
+    header = (
+        "UIA compact inspection: "
+        f"raw={metrics.get('raw', len(elements))}, "
+        f"interactive={metrics.get('interactive', len(elements))}, "
+        f"returned={len(candidates)}, "
+        f"cache_hit={str(bool(metrics.get('cache_hit'))).lower()}"
+    )
+    if len(elements) > len(candidates):
+        header += f", omitted={len(elements) - len(candidates)}"
+    return header + ("\n" + "\n".join(lines) if lines else "\n(no matching elements)")
 
 @tool(description="定位窗口中指定 UI 元素的位置，不执行点击。优先使用规范化 UIA 候选评分；候选有歧义时由 LLM 返回唯一 element key；无 automation_id 时才允许视觉兜底。显式 automation_id 为严格约束，未命中直接失败，不调用模型。")
 async def find_element(
@@ -843,6 +910,8 @@ async def find_and_click(
         if point is None:
             return f"❌ 定位到 '{target}'，但控件坐标无效，已拒绝点击。"
         cx, cy = point
+        scan_metrics = dict(_uia_scan_metrics.get((window or "").casefold(), {}))
+        match_stage = str(element.get("_match_stage") or element.get("source") or "unknown")
 
         # 只有调用方需要跟踪弹窗时才采集窗口快照。
         before_windows = await _snapshot_windows() if detect_new_window else {}
@@ -853,7 +922,10 @@ async def find_and_click(
         result = (
             f"✅ [{element['source']}] 成功点击 '{target}'\n"
             f"   匹配元素: name=\"{element['name']}\" type={element['control_type']}{aid_info}\n"
-            f"   坐标: ({cx}, {cy})"
+            f"   坐标: ({cx}, {cy})\n"
+            f"   定位指标: stage={match_stage} raw={scan_metrics.get('raw', 0)} "
+            f"interactive={scan_metrics.get('interactive', 0)} "
+            f"semantic_candidates={element.get('_semantic_candidate_count', 0)}"
         )
 
         # 点击后检测新窗口

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools import vision
+from tools.registry import list_tools
 from tools.uia import UIAResponseError, normalize_element_records, parse_element_records
 
 
@@ -27,6 +28,18 @@ def _element(
         "is_visible": True,
         "is_enabled": True,
     }
+
+
+@pytest.fixture(autouse=True)
+def reset_uia_cache() -> None:
+    vision.invalidate_uia_cache()
+    yield
+    vision.invalidate_uia_cache()
+
+
+def test_raw_list_elements_is_not_agent_facing() -> None:
+    assert "list_elements" not in list_tools()
+    assert "inspect_elements" in list_tools()
 
 
 def test_uia_normalization_handles_control_type_and_bounds() -> None:
@@ -95,6 +108,65 @@ async def test_interactive_scan_uses_cli_and_keeps_outlook_document(monkeypatch)
     assert [element["name"] for element in elements] == ["Body"]
 
 
+@pytest.mark.asyncio
+async def test_compact_inspection_limits_fields_and_reports_metrics(monkeypatch) -> None:
+    async def fake_activate(title):
+        return "ok"
+
+    async def fake_list_elements(window):
+        return json.dumps([
+            {
+                "name": f"Button {index}",
+                "control_type": "Button",
+                "automation_id": f"button-{index}",
+                "bounds": {"x": index * 10, "y": 10, "width": 50, "height": 20},
+                "extra_large_property": "x" * 500,
+            }
+            for index in range(40)
+        ])
+
+    monkeypatch.setattr(vision, "window_activate", fake_activate)
+    monkeypatch.setattr(vision, "list_elements", fake_list_elements)
+
+    result = await vision.inspect_elements("Window", limit=5)
+
+    assert "raw=40" in result
+    assert "interactive=40" in result
+    assert "returned=5" in result
+    assert "omitted=35" in result
+    assert result.count("\n[") == 5
+    assert "bounds" not in result
+    assert "extra_large_property" not in result
+
+
+@pytest.mark.asyncio
+async def test_interactive_scan_uses_short_cache_and_can_invalidate(monkeypatch) -> None:
+    scans = 0
+
+    async def fake_activate(title):
+        return "ok"
+
+    async def fake_list_elements(window):
+        nonlocal scans
+        scans += 1
+        return json.dumps([{
+            "name": "Send",
+            "control_type": "Button",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 30},
+        }])
+
+    monkeypatch.setattr(vision, "window_activate", fake_activate)
+    monkeypatch.setattr(vision, "list_elements", fake_list_elements)
+
+    await vision._get_interactive_elements("Window")
+    await vision._get_interactive_elements("Window")
+    assert scans == 1
+
+    vision.invalidate_uia_cache("Window")
+    await vision._get_interactive_elements("Window")
+    assert scans == 2
+
+
 def test_deterministic_match_is_normalized_and_prefers_specific_name() -> None:
     elements = [
         _element("E0001", "Email", "Button"),
@@ -140,6 +212,28 @@ async def test_semantic_match_returns_unique_element_key(monkeypatch) -> None:
     matched = await vision._llm_select_element(elements, "recipient input")
 
     assert matched["element_key"] == "E0002"
+
+
+@pytest.mark.asyncio
+async def test_semantic_match_sends_at_most_twelve_candidates(monkeypatch) -> None:
+    elements = [
+        _element(f"E{index:04d}", f"Candidate {index}", "Button", x=index * 10)
+        for index in range(1, 31)
+    ]
+    captured = {}
+
+    class FakeClient:
+        async def chat(self, messages):
+            captured["prompt"] = messages[-1]["content"]
+            return SimpleNamespace(content="NOT_FOUND")
+
+    monkeypatch.setattr(vision, "get_llm_client", lambda: FakeClient())
+
+    assert await vision._llm_select_element(elements, "unmatched action") is None
+    candidate_lines = [
+        line for line in captured["prompt"].splitlines() if line.startswith("- [")
+    ]
+    assert len(candidate_lines) == 12
 
 
 @pytest.mark.asyncio

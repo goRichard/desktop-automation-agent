@@ -24,7 +24,7 @@ ACTION_TO_TOOL = {
     "app.launch": "app_launch",
     "app.activate": "app_switch",
     "app.quit": "app_quit",
-    "ui.inspect": "list_elements",
+    "ui.inspect": "inspect_elements",
     "ui.locate": "find_element",
     "ui.click": "find_and_click",
     "ui.type": "type_text",

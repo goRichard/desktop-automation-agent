@@ -4,6 +4,7 @@ winpeekaboo 工具层：封装全部桌面自动化原子操作
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -12,6 +13,15 @@ import time
 from typing import Any, Optional
 
 from .registry import tool
+
+
+def _invalidate_uia_cache(window: Optional[str] = None) -> None:
+    """Lazy import avoids a module cycle while keeping cached coordinates fresh."""
+    try:
+        from .vision import invalidate_uia_cache
+        invalidate_uia_cache(window)
+    except (ImportError, AttributeError):
+        pass
 
 
 def _run_wpb(*args: str, capture: bool = True) -> str:
@@ -119,6 +129,7 @@ def click(
     if button:
         args += ["--button", button]
     _run_wpb(*args)
+    _invalidate_uia_cache(window)
     return f"已点击: {on}"
 
 
@@ -135,6 +146,7 @@ def scroll(
     if window:
         args += ["--window", window]
     _run_wpb(*args)
+    _invalidate_uia_cache(window)
     return f"已滚动: {direction} x{amount or 3}"
 
 
@@ -149,6 +161,7 @@ def drag(
     if window:
         args += ["--window", window]
     _run_wpb(*args)
+    _invalidate_uia_cache(window)
     return f"已拖放: {from_} -> {to}"
 
 
@@ -169,6 +182,7 @@ def type_text(
     if delay is not None:
         args += ["--delay", str(delay)]
     _run_wpb(*args)
+    _invalidate_uia_cache(window)
     return f"已输入文本: {text[:50]}{'...' if len(text) > 50 else ''}"
 
 
@@ -176,6 +190,7 @@ def type_text(
 def press_key(key: str) -> str:
     """winpeekaboo press --key {key}"""
     _run_wpb("press", "--key", key)
+    _invalidate_uia_cache()
     return f"已按键: {key}"
 
 
@@ -201,6 +216,7 @@ def hotkey(
     if window:
         args += ["--window", window]
     _run_wpb(*args)
+    _invalidate_uia_cache(window)
 
     result = f"已执行组合键: {keys}"
     if should_detect and before is not None:
@@ -447,6 +463,13 @@ def list_screens() -> str:
     return _run_wpb("list", "screens", "--json")
 
 
-@tool(description="列出指定窗口的所有 UI 元素，返回 JSON 格式（含 name、control_type、automation_id、bounds 等）。用于发现窗口中的元素及其 UIA AutomationId——将 automation_id 用于 batch_locate_elements/find_and_click 可实现确定性匹配（零模型调用、跨语言兼容）。window 为目标窗口标题。")
-def list_elements(window: str) -> str:
-    return _run_wpb("list", "elements", "--window", window, "--json")
+async def list_elements(window: str) -> str:
+    """Internal raw UIA scan. Not registered as an Agent-facing tool."""
+    return await asyncio.to_thread(
+        _run_wpb,
+        "list",
+        "elements",
+        "--window",
+        window,
+        "--json",
+    )

@@ -109,7 +109,10 @@ class RuntimeEvidenceCollector:
             return None
         tool = self.tool_getter("list_elements")
         if tool is None:
-            return None
+            # Raw UIA is intentionally not Agent-facing, but remains available
+            # internally as a diagnostic artifact after failures.
+            from tools.winpeekaboo import list_elements
+            tool = list_elements
         try:
             return str(await self._invoke(tool, window=window))
         except Exception as error:

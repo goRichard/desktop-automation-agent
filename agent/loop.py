@@ -38,7 +38,7 @@ _PLAN_OBSERVATION_TOOLS = frozenset({
     "browser_screenshot",
     "capture_image",
     "list_apps",
-    "list_elements",
+    "inspect_elements",
     "list_screens",
     "list_windows",
     "path_exists",

@@ -105,8 +105,9 @@ agent:
     **桌面应用任务**（计算器、记事本、Office、Teams 等本地软件）：
     - 启动应用 → `app_launch`
     - 查看窗口 → `list_windows` / `window_activate`
-    - 查看 UI 元素 → `list_elements`
-    - 点击/输入 → `find_and_click` / `find_and_click_batch` / `type_text` / `press_key`
+    - 查找并点击 → 默认直接使用 `find_and_click` / `find_and_click_batch`
+    - 压缩检查 UI 元素 → 仅在目标名称或 AutomationId 不明确时使用 `inspect_elements`
+    - 输入 → `type_text` / `press_key`
     - 批量定位 → `batch_locate_elements` （同窗口多元素时优先使用）
     - 批量操作 → `run_actions` （click→type_text→press_key→sleep 等连续确定性操作，一次调用完成）
     - 滚动 → `scroll(direction, amount, window)`
@@ -131,11 +132,11 @@ agent:
     ## 元素发现优先级（强制）
 
     定位 UI 元素时，必须按以下优先级选择工具：
-    1. **UIA 优先**：`list_elements` → `batch_locate_elements`（快速、准确、零模型调用）
+    1. **UIA 优先**：直接使用 `find_and_click` / `batch_locate_elements`（内部扫描，快速、准确）
     2. **视觉兜底**：仅当 UIA 无法找到目标元素时，才使用 `capture_image` + `analyze_screen`
 
     ❗ **禁止跳过 UIA 直接调用视觉模型**。多模态模型调用慢（10-15秒）且费用高，仅作为最后手段。
-    ❗ **查找图标/按钮/菜单项**：先用 `list_elements(window="...")` 查看可用元素列表，如果目标在列表中，直接用坐标点击；只有列表中找不到时才截图 + 视觉分析。
+    ❗ **禁止**在 `find_and_click` 前例行调用 UIA 原始列表。只有目标名称或 AutomationId 不明确时，才调用 `inspect_elements(window="...", query="...")` 获取最多 20 个压缩候选。
 
     ## 标签与输入框分离规则（强制）
 

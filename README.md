@@ -193,7 +193,7 @@ GET  /tasks/{id}/executions
 版本、模式和输入参数。
 
 用户确认执行计划后，Runtime 会按当前步骤收窄模型可见的工具：计划声明的工具负责完成
-步骤，`list_windows`、`list_elements`、截图等只读观察工具可以辅助判断状态，但不能代替
+步骤，`list_windows`、`inspect_elements`、截图等只读观察工具可以辅助判断状态，但不能代替
 计划动作。策略越界调用不会执行，模型有一次改正机会；再次越界或已授权工具实际执行失败
 时，计划才会停止。
 
@@ -201,6 +201,13 @@ CLI 会在每次 Chat/Vision 模型响应后显示当前 Run 的累计 Token 用
 返回 `token_usage`，WebSocket 和 Run Event 历史通过 `run.usage` 推送单次增量及累计值。
 如果某个 OpenAI-compatible/Ollama 服务没有返回 `usage`，模型调用次数仍会记录，并明确
 标记未报告的调用；此时 Token 累计值可能不完整。
+
+原始 WinPeekaboo UIA JSON 只供 Adapter 和失败证据采集使用，不注册为 Agent 工具。
+Agent 默认直接调用 `find_and_click`；只有目标名称或 AutomationId 不明确时才调用
+`inspect_elements`。该工具最多返回 30 个压缩候选，默认 20 个，不包含完整 UIA 属性。
+`find_and_click` 先做本地确定性匹配，只有歧义时才向 Chat 模型发送最多 12 个候选；点击、
+输入、按键和滚动后会立即清除 2 秒 UIA 缓存。工具结果中的 `定位指标` 会显示匹配阶段、
+原始元素数、可交互元素数和语义候选数。
 
 视觉验证默认使用分层检查点，不再对每次点击和输入都调用 Vision。每 3 个完成步骤、窗口
 切换、最终步骤和 Send/Submit/Delete 等高风险动作会触发验证。验证只判断刚执行工具的
@@ -331,7 +338,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 98 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 102 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：
