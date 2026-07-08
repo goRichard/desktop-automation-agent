@@ -4,6 +4,7 @@
 原型，后续通过 Electron 封装为独立 Windows 应用。
 
 产品设计见 [Electron MVP Spec](specs/electron_desktop_agent_mvp.md)。
+新增 Windows 应用时参考 [Application Skill Guide](docs/APPLICATION_SKILL_GUIDE.md)。
 
 准备在 Windows 实机或 VM 上运行时，请先阅读
 [Windows 运行与测试指南](docs/WINDOWS_RUNBOOK.md)。该文档包含环境准备、模型配置、
