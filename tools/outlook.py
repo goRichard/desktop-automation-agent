@@ -104,8 +104,7 @@ async def outlook_fill_message(
 ) -> dict[str, Any]:
     window = await _resolve_compose_window_title(window)
     await window_activate(window)
-    raw_elements = await list_elements(window=window)
-    elements = _parse_elements(raw_elements)
+    elements = await _scan_uia_elements(window, "Outlook compose")
     required = {
         "recipient": recipient,
         "subject": subject,
@@ -222,8 +221,7 @@ async def _submit_attachment_path(
         )
 
     await window_activate(dialog_title)
-    raw_elements = await list_elements(window=dialog_title)
-    elements = _parse_elements(raw_elements)
+    elements = await _scan_uia_elements(dialog_title, "Attachment file dialog")
     file_name_point = _uia_control_point(
         elements,
         aliases=("File name", "File name:", "文件名", "檔案名稱"),
@@ -282,7 +280,7 @@ async def _click_uia_control(
     automation_ids: tuple[str, ...],
     control_types: tuple[str, ...],
 ) -> None:
-    elements = _parse_elements(await list_elements(window=window))
+    elements = await _scan_uia_elements(window, role)
     point = _uia_control_point(
         elements,
         aliases=aliases,
@@ -300,6 +298,31 @@ async def _click_uia_control(
         {"tool": "sleep", "args": {"seconds": 0.4}},
     ]
     await run_actions(json.dumps(actions, ensure_ascii=False))
+
+
+async def _scan_uia_elements(
+    window: str,
+    role: str,
+    attempts: int = 4,
+) -> list[dict[str, Any]]:
+    last_error = "no response"
+    last_raw: Any = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            last_raw = await list_elements(window=window)
+            elements = _parse_elements(last_raw)
+            if elements:
+                return elements
+            last_error = "WinPeekaboo returned an empty element list"
+        except Exception as error:
+            last_error = str(error)
+        if attempt < attempts:
+            await asyncio.sleep(0.2 * attempt)
+    preview = str(last_raw or "<empty>").replace("\r", " ").replace("\n", " ")[:160]
+    raise OutlookAutomationError(
+        f"{role} UIA scan failed after {attempts} attempts: {last_error}; "
+        f"raw={preview!r}"
+    )
 
 
 def _uia_control_point(

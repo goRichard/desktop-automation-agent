@@ -198,7 +198,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-85 passed
+88 passed
 ```
 
 测试覆盖：
@@ -219,7 +219,7 @@ python -m pytest -q
 - Starlette `TestClient` 关于 `httpx` 的弃用提示。
 - 视觉 BBox 工具中的 `TestReport` 不参与 pytest 收集。
 
-两者不影响 85 项测试通过。如果出现 failed/error，请保留完整输出：
+两者不影响 88 项测试通过。如果出现 failed/error，请保留完整输出：
 
 ```powershell
 python -m pytest -q 2>&1 |
@@ -508,6 +508,8 @@ Windows 实机验证通过后，才发布该版本：
 解析当前写信窗口，不得继续使用 `Untitled - Message (HTML)`。
 这三个附件控件均使用 UIA 名称、AutomationId 和 ControlType 确定性匹配，不应产生模型
 调用；如果 UIA 结构不兼容，应直接返回控件摘要，不得以模型认证错误代替桌面错误。
+临时菜单或文件对话框首次返回空 UIA 输出时会自动重试；解析器兼容 UTF-8 BOM 和日志前缀。
+连续失败时错误应明确显示扫描阶段、重试次数及 `raw=` 输出摘要。
 
 ```powershell
 Invoke-RestMethod `

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools import vision
-from tools.uia import normalize_element_records
+from tools.uia import UIAResponseError, normalize_element_records, parse_element_records
 
 
 def _element(
@@ -47,6 +47,20 @@ def test_uia_normalization_handles_control_type_and_bounds() -> None:
         "height": 100,
     }
     assert elements[0]["center"] == (110, 70)
+
+
+def test_uia_parser_accepts_bom_and_log_prefix() -> None:
+    elements = parse_element_records(
+        '\ufeffWinPeekaboo INFO: scanning window "Message"\n'
+        '[{"name":"Send","control_type":"Button"}]\n'
+    )
+
+    assert elements[0]["name"] == "Send"
+
+
+def test_uia_parser_reports_empty_output_explicitly() -> None:
+    with pytest.raises(UIAResponseError, match="empty output"):
+        parse_element_records("  \r\n")
 
 
 @pytest.mark.asyncio

@@ -71,6 +71,31 @@ def test_file_dialog_uia_prefers_ordered_automation_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_outlook_uia_scan_retries_empty_transient_response(monkeypatch) -> None:
+    responses = iter([
+        "",
+        json.dumps([{
+            "name": "Browse This PC",
+            "control_type": "MenuItem",
+            "bounds": {"x": 10, "y": 20, "width": 100, "height": 30},
+        }]),
+    ])
+
+    async def fake_list_elements(window):
+        return next(responses)
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(outlook, "list_elements", fake_list_elements)
+    monkeypatch.setattr(outlook.asyncio, "sleep", no_sleep)
+
+    elements = await outlook._scan_uia_elements("Message", "Browse This PC")
+
+    assert elements[0]["name"] == "Browse This PC"
+
+
+@pytest.mark.asyncio
 async def test_open_compose_uses_shortcut_and_returns_new_window(monkeypatch) -> None:
     main = _window(1, "Inbox - Outlook")
     compose = _window(2, "Untitled - Message (HTML)")

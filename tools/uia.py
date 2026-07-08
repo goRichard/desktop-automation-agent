@@ -16,7 +16,9 @@ def parse_element_records(raw: Any) -> list[dict[str, Any]]:
         for _ in range(3):
             if not isinstance(value, str):
                 break
-            value = json.loads(value)
+            value = _decode_json_text(value)
+    except UIAResponseError:
+        raise
     except (TypeError, json.JSONDecodeError) as error:
         raise UIAResponseError(f"Invalid WinPeekaboo element response: {error}") from error
 
@@ -27,6 +29,33 @@ def parse_element_records(raw: Any) -> list[dict[str, Any]]:
             f"{response_shape(value)}"
         )
     return elements
+
+
+def _decode_json_text(raw: str) -> Any:
+    text = raw.strip().lstrip("\ufeff")
+    if not text:
+        raise UIAResponseError("Invalid WinPeekaboo element response: empty output")
+
+    decoder = json.JSONDecoder()
+    last_error: Optional[json.JSONDecodeError] = None
+    candidate_offsets = [0]
+    candidate_offsets.extend(
+        index
+        for index, character in enumerate(text)
+        if index and character in "[{\""
+    )
+    for offset in candidate_offsets:
+        try:
+            value, _ = decoder.raw_decode(text[offset:])
+            if offset and not isinstance(value, (dict, list)):
+                continue
+            return value
+        except json.JSONDecodeError as error:
+            last_error = error
+    detail = str(last_error) if last_error else "no JSON value found"
+    raise UIAResponseError(
+        f"Invalid WinPeekaboo element response: {detail}"
+    ) from last_error
 
 
 def normalize_element_records(raw: Any) -> list[dict[str, Any]]:
@@ -137,8 +166,8 @@ def _extract_element_records(
         return None
     if isinstance(value, str):
         try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
+            decoded = _decode_json_text(value)
+        except UIAResponseError:
             return None
         return _extract_element_records(decoded, depth + 1)
     if isinstance(value, list):
