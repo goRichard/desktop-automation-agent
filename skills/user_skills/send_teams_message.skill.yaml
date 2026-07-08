@@ -1,0 +1,92 @@
+apiVersion: desktop-agent/v1alpha1
+kind: Skill
+
+metadata:
+  id: send-teams-message
+  name: send_teams_message
+  version: 1.0.0
+  status: draft
+  description: 使用 New Teams 确定性地发送聊天消息和可选附件
+  tags: [teams, chat, windows]
+  triggers:
+    - 发送 Teams 消息
+    - 发 Teams 消息
+    - Teams 聊天
+    - send Teams message
+    - message on Teams
+
+applications:
+  - id: teams-new
+    process: ms-teams.exe
+    required: true
+
+inputs:
+  recipient:
+    type: string
+    description: Teams 收件人姓名或邮箱地址
+    required: true
+  message:
+    type: string
+    description: 要发送的聊天消息
+    required: true
+  attachments:
+    type: array
+    items: string
+    description: 本地附件绝对路径列表
+    required: false
+    default: []
+
+execution:
+  defaultMode: guided
+  timeoutSeconds: 300
+  steps:
+    - id: launch-teams
+      name: 启动 New Teams
+      action: teams.launch
+      retry:
+        maxAttempts: 2
+        delaySeconds: 2
+      onFailure: stop
+
+    - id: open-new-chat
+      name: 使用 Ctrl+N 打开新聊天
+      action: teams.openNewChat
+      target:
+        window: "{{ steps.launch-teams.output.data.windowTitle }}"
+      retry:
+        maxAttempts: 2
+        delaySeconds: 1
+      onFailure: stop
+
+    - id: fill-chat
+      name: 填写收件人和消息
+      action: teams.fillChat
+      target:
+        window: "{{ steps.open-new-chat.output.data.windowTitle }}"
+      with:
+        recipient: "{{ input.recipient }}"
+        message: "{{ input.message }}"
+      retry:
+        maxAttempts: 2
+        delaySeconds: 1
+      onFailure: stop
+
+    - id: add-attachments
+      name: 添加可选附件
+      action: teams.addAttachments
+      target:
+        window: "{{ steps.open-new-chat.output.data.windowTitle }}"
+      with:
+        paths: "{{ input.attachments }}"
+        timeout_seconds: 10
+      onFailure: stop
+
+    - id: send-message
+      name: 点击 Send 发送 Teams 消息
+      action: teams.send
+      target:
+        window: "{{ steps.open-new-chat.output.data.windowTitle }}"
+      risk: external_side_effect
+      policy:
+        requireConfirmation: false
+      onFailure: stop

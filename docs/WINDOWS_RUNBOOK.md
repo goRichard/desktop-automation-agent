@@ -216,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-93 passed
+98 passed
 ```
 
 测试覆盖：
@@ -530,6 +530,37 @@ python -m winpeekaboo list elements --window "<Teams 主窗口标题>" --json
 
 记录实际进程名、窗口标题和 Teams 版本。如果 `ms-teams.exe` 存在但 WinPeekaboo 无法
 枚举窗口，需要同时记录它是否为 MSIX 应用以及当前 WinPeekaboo 版本。
+
+Runtime 会导入 `send-teams-message@1.0.0`。该 Skill 接收 `recipient`、`message` 和可选
+`attachments`，执行路径为：
+
+```text
+teams.launch -> Ctrl+N -> fillChat -> addAttachments -> click Send
+```
+
+附件菜单通过 UIA 匹配 `Actions and apps`、`Attach file`；系统文件对话框通过前台
+`Alt+N -> 路径 -> Enter` 完成，不调用视觉模型。发送步骤标记为
+`external_side_effect`，但配置了 `requireConfirmation: false`，不会生成 `user.confirm`。
+首次实机测试必须使用专用测试账号：
+
+```powershell
+$teamsRun = @{
+  skillId = "send-teams-message"
+  skillVersion = "1.0.0"
+  mode = "guided"
+  inputs = @{
+    recipient = "your-test-user@example.com"
+    message = "FlowPilot New Teams adapter test"
+    attachments = @()
+  }
+} | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod "$baseUrl/runs" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $teamsRun
+```
+
+如果控件匹配失败，保留错误中的 UIA 控件摘要；优先补充 Teams Adapter 的别名和
+AutomationId，不要改用后台 Graph API 或模型坐标点击。
 
 ### W05：Edge/Playwright
 

@@ -20,8 +20,10 @@ CLI/Runtime API 启动、WinPeekaboo 原子操作验证、Outlook/Edge/Teams 验
 - Skill：支持版本化 YAML Schema、Markdown 兼容导入、生命周期管理和确定性步骤执行。
 - Classic Outlook：提供基于 WinPeekaboo 的应用 Adapter，确定性完成启动、写信、填写、
   附件和发送；附件使用 `Alt+N → A → F → Browse This PC`，并适配主题导致的写信窗口
-  标题变化。标准附件对话框完全使用 UIA，不调用 Chat/Vision 模型；只有 Adapter 整体失败
+  标题变化。标准附件对话框使用前台键盘输入，不调用 Chat/Vision 模型；只有 Adapter 整体失败
   后才进入受限 Agent fallback。
+- New Teams：提供基于 WinPeekaboo 的应用 Adapter，使用 `Ctrl+N`、UIA 点击和前台文件
+  对话框输入完成收件人、消息、可选附件和发送。
 - 调度：通过 APScheduler 和 SQLite 持久化 Cron Task。
 - 历史：通过 SQLModel/SQLite 保存会话、消息、任务和执行日志。
 
@@ -285,16 +287,17 @@ POST /runs (skillId) -> Skill Executor -> App Adapter -> WinPeekaboo
 CLI / POST /runs (user_input) -> Agent Loop -> LLM Tool Calling -> WinPeekaboo
 ```
 
-当前 CLI 的自由文本 Skill 匹配仍走 Agent 计划路径。需要验证确定性 Outlook Skill 时，
-使用 Runtime API 提交 `skillId: send-email`；后续 Chat/UI 路由会先把自由文本解析为
+当前 CLI 的自由文本 Skill 匹配仍走 Agent 计划路径。需要验证确定性 Outlook/Teams Skill 时，
+使用 Runtime API 提交 `skillId: send-email` 或 `skillId: send-teams-message`；后续 Chat/UI 路由会先把自由文本解析为
 结构化 Skill 输入，再提交同一条 Runtime 路径。
 
-当前共注册 55 个工具，分布在：
+当前共注册 60 个工具，分布在：
 
 - `tools/winpeekaboo.py`：桌面原子操作。
 - `tools/vision.py`：UIA、语义和视觉定位。
 - `tools/browser.py`：Edge 网页自动化。
 - `tools/outlook.py`：Classic Outlook 确定性应用 Adapter。
+- `tools/teams.py`：New Teams 确定性聊天和附件 Adapter。
 - `tools/system.py`：受控文件、命令和剪贴板操作。
 - `tools/actions.py`：连续确定性操作。
 - `tools/planner.py`：计划生成和状态。
@@ -328,7 +331,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
   --exclude tests/vision_bbox
 ```
 
-当前基线包含 93 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
+当前基线包含 98 项自动化测试。完整仓库的 `ruff check .` 尚有旧 CLI、工具和视觉评估
 脚本的存量告警，因此现阶段使用上面的核心模块检查范围；这不影响 `pytest` 执行。
 
 不要提交以下本地数据：

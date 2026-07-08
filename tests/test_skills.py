@@ -127,6 +127,31 @@ def test_outlook_skill_is_structured_and_bounded() -> None:
     assert document.execution.steps[-1].policy.require_confirmation is False
 
 
+def test_teams_skill_is_structured_and_has_no_confirmation_step() -> None:
+    skill_path = (
+        Path(__file__).parents[1]
+        / "skills"
+        / "user_skills"
+        / "send_teams_message.skill.yaml"
+    )
+    parsed = parse_skill_file(skill_path)
+
+    assert parsed is not None
+    assert parsed.document is not None
+    document = parsed.document
+    assert document.metadata.id == "send-teams-message"
+    assert document.metadata.version == "1.0.0"
+    assert [step.action for step in document.execution.steps] == [
+        "teams.launch",
+        "teams.openNewChat",
+        "teams.fillChat",
+        "teams.addAttachments",
+        "teams.send",
+    ]
+    assert document.execution.steps[-1].risk == "external_side_effect"
+    assert document.execution.steps[-1].policy.require_confirmation is False
+
+
 @pytest.mark.asyncio
 async def test_outlook_skill_executes_adapter_without_agent(monkeypatch) -> None:
     skill_path = (
