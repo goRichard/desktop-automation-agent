@@ -216,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-91 passed
+92 passed
 ```
 
 测试覆盖：
@@ -516,7 +516,9 @@ Invoke-RestMethod "$baseUrl/runs/$($run.id)/confirm" `
   -Method Post -Headers $headers -ContentType "application/json" -Body $confirmBody
 ```
 
-批准后 Adapter 使用 `Alt+S`，并以写信窗口关闭作为成功条件。发送步骤没有 Agent
+批准后 Adapter 先激活最新 HWND 对应的写信窗口，等待焦点稳定，再向当前前台窗口发送
+不带窗口标题参数的 `Alt+S`，并以写信窗口关闭作为成功条件。这样避免 WinPeekaboo 在按键
+注入前按标题重复连接/激活窗口所造成的焦点竞争。发送步骤没有 Agent
 fallback：如果发送结果不明确，Run 会失败并保留证据，不会由模型再次点击 Send。
 Windows 实机验证通过后，才发布该版本：
 

@@ -376,7 +376,7 @@ def _element_summary(elements: list[dict[str, Any]], limit: int = 20) -> str:
     return json.dumps(summary, ensure_ascii=False)
 
 
-@tool(description="在已确认的 Outlook 写信窗口使用 Alt+S 发送，并确认写信窗口已关闭。")
+@tool(description="激活已确认的 Classic Outlook 写信窗口，等待焦点稳定后向前台发送 Alt+S，并确认窗口已关闭。")
 async def outlook_send_message(
     window: str,
     timeout_seconds: float = 8.0,
@@ -392,7 +392,11 @@ async def outlook_send_message(
         raise OutlookAutomationError(f"Compose window was not found: {window}")
 
     await window_activate(window)
-    await hotkey(keys="Alt+S", window=window)
+    await asyncio.sleep(0.35)
+    # Do not pass the title again. Reconnecting/re-activating immediately before
+    # key injection can move focus away from the compose editor and cause the
+    # Windows invalid-key beep. The resolved compose window is already foreground.
+    await hotkey(keys="Alt+S")
     closed = await _wait_until(
         lambda records: not any(
             _window_key(item) in matching_keys for item in records
@@ -400,8 +404,21 @@ async def outlook_send_message(
         timeout_seconds,
     )
     if not closed:
+        current = await _list_window_records()
+        before_keys = {_window_key(item) for item in before}
+        new_titles = [
+            _window_title(item)
+            for item in current
+            if _window_key(item) not in before_keys
+        ]
+        detail = (
+            f"; possible blocking windows: {new_titles}"
+            if new_titles
+            else "; no new blocking window was detected"
+        )
         raise OutlookAutomationError(
-            "Send shortcut was issued but the compose window is still open"
+            "Foreground Alt+S was issued but the compose window is still open"
+            + detail
         )
     global _last_compose_window_key
     _last_compose_window_key = None

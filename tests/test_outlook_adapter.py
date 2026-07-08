@@ -221,7 +221,7 @@ async def test_send_waits_for_compose_window_to_close(monkeypatch) -> None:
 
     assert result["data"]["windowClosed"] is True
     assert result["data"]["windowTitle"] == "Status - Message (HTML)"
-    assert shortcuts == [("Alt+S", "Status - Message (HTML)")]
+    assert shortcuts == [("Alt+S", None)]
 
 
 @pytest.mark.asyncio
@@ -255,8 +255,38 @@ async def test_send_tracks_compose_by_handle_when_title_is_subject_only(monkeypa
 
     assert result["data"]["windowTitle"] == "Quarterly Status"
     assert activations == ["Quarterly Status"]
-    assert shortcuts == [("Alt+S", "Quarterly Status")]
+    assert shortcuts == [("Alt+S", None)]
     assert outlook._last_compose_window_key is None
+
+
+@pytest.mark.asyncio
+async def test_send_reports_new_blocking_dialog(monkeypatch) -> None:
+    compose = _window(2, "Status - Message (HTML)")
+    main = _window(1, "Inbox - Outlook")
+    blocker = _window(3, "Check Names", "OUTLOOK.EXE")
+    calls = 0
+
+    async def fake_list_windows():
+        nonlocal calls
+        calls += 1
+        records = [compose, main] if calls == 1 else [compose, main, blocker]
+        return json.dumps(records)
+
+    async def fake_activate(title):
+        return "ok"
+
+    async def fake_hotkey(keys, window=None):
+        return "ok"
+
+    monkeypatch.setattr(outlook, "list_windows", fake_list_windows)
+    monkeypatch.setattr(outlook, "window_activate", fake_activate)
+    monkeypatch.setattr(outlook, "hotkey", fake_hotkey)
+
+    with pytest.raises(outlook.OutlookAutomationError, match="Check Names"):
+        await outlook.outlook_send_message(
+            window="Status - Message (HTML)",
+            timeout_seconds=0.1,
+        )
 
 
 @pytest.mark.asyncio
