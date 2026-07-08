@@ -269,20 +269,7 @@ async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
                 "control_type": "MenuItem",
                 "bounds": {"x": 100, "y": 120, "width": 180, "height": 30},
             }])
-        return json.dumps([
-            {
-                "name": "File name:",
-                "control_type": "Edit",
-                "automation_id": "FileNameControlHost",
-                "bounds": {"x": 200, "y": 400, "width": 500, "height": 30},
-            },
-            {
-                "name": "Insert",
-                "control_type": "Button",
-                "automation_id": "1",
-                "bounds": {"x": 720, "y": 400, "width": 90, "height": 30},
-            },
-        ])
+        raise AssertionError("Insert File dialog must not be connected through UIA")
 
     monkeypatch.setattr(outlook, "_resolve_compose_window_title", fake_resolve)
     monkeypatch.setattr(outlook, "window_activate", fake_activate)
@@ -311,14 +298,19 @@ async def test_attachment_uses_shortcuts_and_refreshes_subject_window_title(
         "args": {"on": "190,135", "window": compose_title},
     }
     assert action_batches[2][0] == {
-        "tool": "click",
-        "args": {"on": "450,415", "window": dialog_title},
+        "tool": "hotkey",
+        "args": {"keys": "Alt+N"},
     }
     assert action_batches[2][-1] == {
-        "tool": "click",
-        "args": {"on": "765,415", "window": dialog_title},
+        "tool": "press_key",
+        "args": {"key": "Enter"},
     }
     assert action_batches[2][2]["args"]["text"] == str(attachment.resolve())
+    assert all(
+        "window" not in action["args"]
+        for action in action_batches[2]
+    )
     assert resolve_calls[0] == "Untitled - Message (HTML)"
     assert result["data"]["windowTitle"] == compose_title
+    assert dialog_title not in activations
     assert activations[-1] == compose_title

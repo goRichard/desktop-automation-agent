@@ -146,7 +146,7 @@ async def outlook_fill_message(
     )
 
 
-@tool(description="使用 Classic Outlook 键盘路径 Alt+N → A → F → Browse This PC 添加附件；空列表直接跳过。")
+@tool(description="使用 Classic Outlook 键盘路径 Alt+N → A → F → Browse This PC 添加附件；文件对话框使用前台键盘输入，不按标题连接；空列表直接跳过。")
 async def outlook_add_attachments(
     window: str,
     paths: list[str],
@@ -220,44 +220,15 @@ async def _submit_attachment_path(
             f"Attachment dialog was not found before file input: {dialog_title}"
         )
 
-    await window_activate(dialog_title)
-    elements = await _scan_uia_elements(dialog_title, "Attachment file dialog")
-    file_name_point = _uia_control_point(
-        elements,
-        aliases=("File name", "File name:", "文件名", "檔案名稱"),
-        automation_ids=("FileNameControlHost", "1001", "1148"),
-        control_types=("Edit", "ComboBox"),
-    )
-    confirm_point = _uia_control_point(
-        elements,
-        aliases=("Insert", "Open", "OK", "确定", "插入", "打开", "開啟"),
-        automation_ids=("1",),
-        control_types=("Button",),
-    )
-    if file_name_point is None:
-        raise OutlookAutomationError(
-            "File name input field was not found by deterministic UIA matching: "
-            f"{_element_summary(elements)}"
-        )
-    if confirm_point is None:
-        raise OutlookAutomationError(
-            "Attachment confirmation button was not found by deterministic UIA matching: "
-            f"{_element_summary(elements)}"
-        )
-
-    file_x, file_y = file_name_point
-    confirm_x, confirm_y = confirm_point
+    # The Windows common file dialog is already foreground after Browse This PC.
+    # Do not pass its title back to WinPeekaboo: some dialog hosts cannot be
+    # reconnected by title even though they accept foreground keyboard input.
+    # Alt+N focuses File name; Enter invokes the default Open/Insert button.
     input_actions = [
-        {
-            "tool": "click",
-            "args": {"on": f"{file_x},{file_y}", "window": dialog_title},
-        },
-        {"tool": "hotkey", "args": {"keys": "Ctrl+A", "window": dialog_title}},
-        {"tool": "type_text", "args": {"text": path, "window": dialog_title}},
-        {
-            "tool": "click",
-            "args": {"on": f"{confirm_x},{confirm_y}", "window": dialog_title},
-        },
+        {"tool": "hotkey", "args": {"keys": "Alt+N"}},
+        {"tool": "hotkey", "args": {"keys": "Ctrl+A"}},
+        {"tool": "type_text", "args": {"text": path}},
+        {"tool": "press_key", "args": {"key": "Enter"}},
     ]
     await run_actions(json.dumps(input_actions, ensure_ascii=False))
 
