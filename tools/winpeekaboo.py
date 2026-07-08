@@ -24,7 +24,11 @@ def _invalidate_uia_cache(window: Optional[str] = None) -> None:
         pass
 
 
-def _run_wpb(*args: str, capture: bool = True) -> str:
+def _run_wpb(
+    *args: str,
+    capture: bool = True,
+    timeout_seconds: Optional[float] = 30.0,
+) -> str:
     """执行 winpeekaboo 命令，返回 stdout
 
     注意：
@@ -42,14 +46,22 @@ def _run_wpb(*args: str, capture: bool = True) -> str:
     env["PYTHONUTF8"] = "1"
     env["TERM"] = "dumb"
 
-    result = subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=capture,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        operation = " ".join(args[:2]) or "unknown operation"
+        raise RuntimeError(
+            f"winpeekaboo command timed out after {timeout_seconds}s "
+            f"during {operation}"
+        ) from error
     if result.returncode != 0:
         # 1) 先从 stdout 提取真正的错误（rich traceback 或普通错误消息）
         stdout_text = (result.stdout or "").strip()
@@ -238,7 +250,9 @@ def hotkey(
 
 def _window_snapshot() -> Optional[dict[str, dict[str, Any]]]:
     try:
-        value = json.loads(_run_wpb("list", "windows", "--json"))
+        value = json.loads(
+            _run_wpb("list", "windows", "--json", timeout_seconds=8.0)
+        )
     except Exception:
         return None
     if not isinstance(value, list):
@@ -341,8 +355,14 @@ def _window_record_priority(item: dict[str, Any]) -> tuple[int, int, int]:
 # ══════════════════════════════════════════════════════
 
 @tool(description="激活（聚焦）指定窗口，将其置于前台。title 为窗口标题（支持部分匹配）。")
-def window_activate(title: str) -> str:
-    _run_wpb("window", "activate", "--title", title)
+def window_activate(title: str, timeout_seconds: float = 8.0) -> str:
+    _run_wpb(
+        "window",
+        "activate",
+        "--title",
+        title,
+        timeout_seconds=timeout_seconds,
+    )
     return f"已激活窗口: {title}"
 
 
@@ -446,11 +466,14 @@ def app_switch(name: str) -> str:
 # ══════════════════════════════════════════════════════
 
 @tool(description="列出所有打开的窗口，返回 JSON 格式的窗口列表（包含标题、句柄等）。filter 为可选过滤关键字。")
-def list_windows(filter: Optional[str] = None) -> str:
+def list_windows(
+    filter: Optional[str] = None,
+    timeout_seconds: float = 8.0,
+) -> str:
     args = ["list", "windows", "--json"]
     if filter:
         args += ["--filter", filter]
-    return _run_wpb(*args)
+    return _run_wpb(*args, timeout_seconds=timeout_seconds)
 
 
 @tool(description="列出所有正在运行的应用程序，返回 JSON 格式。")
@@ -463,7 +486,7 @@ def list_screens() -> str:
     return _run_wpb("list", "screens", "--json")
 
 
-async def list_elements(window: str) -> str:
+async def list_elements(window: str, timeout_seconds: float = 8.0) -> str:
     """Internal raw UIA scan. Not registered as an Agent-facing tool."""
     return await asyncio.to_thread(
         _run_wpb,
@@ -472,4 +495,5 @@ async def list_elements(window: str) -> str:
         "--window",
         window,
         "--json",
+        timeout_seconds=timeout_seconds,
     )

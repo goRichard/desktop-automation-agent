@@ -216,7 +216,7 @@ python -m pytest -q
 当前基线预期：
 
 ```text
-102 passed
+105 passed
 ```
 
 测试覆盖：
@@ -561,6 +561,12 @@ Invoke-RestMethod "$baseUrl/runs" `
 
 如果控件匹配失败，保留错误中的 UIA 控件摘要；优先补充 Teams Adapter 的别名和
 AutomationId，不要改用后台 Graph API 或模型坐标点击。
+
+如果 Run 停在 `teams_fill_chat`，首先检查错误阶段。窗口枚举、窗口激活和原始 UIA 扫描
+现在均有 8 秒单次超时；新聊天 UIA 最多尝试 2 次。错误中的
+`window resolution`、`UIA scan` 或 `foreground input` 分别对应窗口解析、Teams WebView
+元素树枚举和键盘/鼠标输入。出现 `list elements` 超时时，应保留同一窗口下手工执行
+`python -m winpeekaboo list elements --window "<title>" --json` 的结果及 WinPeekaboo 版本。
 
 ### W05：Edge/Playwright
 

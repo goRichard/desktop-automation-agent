@@ -78,6 +78,44 @@ async def test_fill_chat_uses_one_scan_and_foreground_actions(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_fill_chat_reports_uia_scan_timeout_stage(monkeypatch) -> None:
+    scans = 0
+
+    async def fake_resolve(preferred=None):
+        return "Microsoft Teams"
+
+    async def fake_activate(title):
+        return "ok"
+
+    async def fake_list_elements(window):
+        nonlocal scans
+        scans += 1
+        raise RuntimeError(
+            "winpeekaboo command timed out after 8.0s during list elements"
+        )
+
+    async def no_sleep(*args):
+        return None
+
+    monkeypatch.setattr(teams, "_resolve_teams_window_title", fake_resolve)
+    monkeypatch.setattr(teams, "window_activate", fake_activate)
+    monkeypatch.setattr(teams, "list_elements", fake_list_elements)
+    monkeypatch.setattr(teams.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(
+        teams.TeamsAutomationError,
+        match="teams_fill_chat stopped during UIA scan.*timed out",
+    ):
+        await teams.teams_fill_chat(
+            window="Microsoft Teams",
+            recipient="person@example.com",
+            message="hello",
+        )
+
+    assert scans == 2
+
+
+@pytest.mark.asyncio
 async def test_attachment_dialog_uses_foreground_keyboard(monkeypatch, tmp_path) -> None:
     attachment = tmp_path / "report.txt"
     attachment.write_text("report", encoding="utf-8")

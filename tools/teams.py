@@ -47,9 +47,23 @@ async def teams_fill_chat(
     recipient: str,
     message: str,
 ) -> dict[str, Any]:
-    window = await _resolve_teams_window_title(window)
+    try:
+        window = await _resolve_teams_window_title(window)
+    except Exception as error:
+        raise TeamsAutomationError(
+            f"teams_fill_chat stopped during window resolution: {error}"
+        ) from error
     await window_activate(window)
-    elements = await _scan_uia_elements(window, "Teams new chat")
+    try:
+        elements = await _scan_uia_elements(
+            window,
+            "Teams new chat",
+            attempts=2,
+        )
+    except TeamsAutomationError as error:
+        raise TeamsAutomationError(
+            f"teams_fill_chat stopped during UIA scan: {error}"
+        ) from error
     recipient_point = _control_point(
         elements,
         aliases=(
@@ -89,7 +103,12 @@ async def teams_fill_chat(
         {"tool": "click", "args": {"on": f"{message_x},{message_y}"}},
         {"tool": "type_text", "args": {"text": message}},
     ]
-    output = await run_actions(json.dumps(actions, ensure_ascii=False))
+    try:
+        output = await run_actions(json.dumps(actions, ensure_ascii=False))
+    except Exception as error:
+        raise TeamsAutomationError(
+            f"teams_fill_chat stopped during foreground input: {error}"
+        ) from error
     return _success(
         "fill_chat",
         windowTitle=window,
@@ -216,7 +235,7 @@ async def _click_control(
 async def _scan_uia_elements(
     window: str,
     role: str,
-    attempts: int = 4,
+    attempts: int = 2,
 ) -> list[dict[str, Any]]:
     last_error = "empty response"
     for attempt in range(1, attempts + 1):
