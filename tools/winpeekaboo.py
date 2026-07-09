@@ -97,14 +97,11 @@ def capture_image(
     指定 window 时自动执行 window activate，确保目标窗口在前台可见。
     mss 截图库只能捕获屏幕可见区域，窗口被遮挡或最小化时截图内容不正确。
     """
-    # 指定窗口时自动激活前置，解决 mss 遮挡问题
+    # 指定窗口时自动激活前置，解决 mss 遮挡问题。这里不能静默忽略激活失败：
+    # WinPeekaboo CLI 在部分环境下可能返回成功但窗口没有真的成为前台窗口。
     if window:
-        import time
-        try:
-            _run_wpb("window", "activate", "--title", window)
-            time.sleep(0.3)  # 等待窗口渲染到前台
-        except Exception:
-            pass  # 激活失败不阻断截图（降级为截当前可见内容）
+        _restore_activate_and_verify(window)
+        time.sleep(0.3)  # 等待窗口渲染到前台
 
     args = ["image", "--output", output]
     if window:
@@ -356,6 +353,22 @@ def _window_record_priority(item: dict[str, Any]) -> tuple[int, int, int]:
 
 @tool(description="激活（聚焦）指定窗口，将其置于前台。title 为窗口标题（支持部分匹配）。")
 def window_activate(title: str, timeout_seconds: float = 8.0) -> str:
+    _restore_activate_and_verify(title, timeout_seconds=timeout_seconds)
+    return f"已激活窗口: {title}"
+
+
+def _restore_activate_and_verify(title: str, timeout_seconds: float = 8.0) -> None:
+    try:
+        _run_wpb(
+            "window",
+            "restore",
+            "--title",
+            title,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception:
+        # 有些窗口本来没有最小化，restore 失败不代表 activate 一定失败。
+        pass
     _run_wpb(
         "window",
         "activate",
@@ -363,7 +376,85 @@ def window_activate(title: str, timeout_seconds: float = 8.0) -> str:
         title,
         timeout_seconds=timeout_seconds,
     )
-    return f"已激活窗口: {title}"
+    time.sleep(0.35)
+    _verify_window_foreground(title, timeout_seconds=timeout_seconds)
+
+
+def _verify_window_foreground(title: str, timeout_seconds: float = 8.0) -> None:
+    try:
+        records = json.loads(
+            _run_wpb(
+                "list",
+                "windows",
+                "--json",
+                "--filter",
+                title,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f'Window "{title}" activation was issued, but foreground verification failed: {error}'
+        ) from error
+    if isinstance(records, dict):
+        records = records.get("windows", [])
+    if not isinstance(records, list):
+        raise RuntimeError(
+            f'Window "{title}" activation was issued, but list windows returned '
+            f"unsupported shape: {type(records).__name__}"
+        )
+
+    candidates = [
+        item for item in records
+        if isinstance(item, dict) and _window_record_matches(item, title)
+    ]
+    if not candidates:
+        raise RuntimeError(
+            f'Window "{title}" activation was issued, but the target window was not '
+            "found during verification"
+        )
+    if not any(_window_record_has_foreground_flag(item) for item in candidates):
+        # Older WinPeekaboo builds may not expose active/foreground fields. In that case
+        # we cannot verify, but we should not fail every activation.
+        return
+    if not any(_window_record_is_foreground(item) for item in candidates):
+        summary = [
+            {
+                "title": _window_record_title(item),
+                "process": _window_record_process(item),
+                "hwnd": item.get("hwnd"),
+                "is_active": item.get("is_active"),
+                "is_foreground": item.get("is_foreground"),
+                "is_focused": item.get("is_focused"),
+                "active": item.get("active"),
+                "is_minimized": item.get("is_minimized"),
+            }
+            for item in candidates[:5]
+        ]
+        raise RuntimeError(
+            f'WinPeekaboo reported activate success for "{title}", but the window '
+            f"is not foreground after activation: {json.dumps(summary, ensure_ascii=False)}"
+        )
+
+
+def _window_record_matches(item: dict[str, Any], title: str) -> bool:
+    actual = _window_record_title(item).casefold()
+    expected = title.casefold()
+    return bool(actual) and (actual == expected or expected in actual or actual in expected)
+
+
+def _window_record_has_foreground_flag(item: dict[str, Any]) -> bool:
+    return any(
+        key in item
+        for key in ("is_active", "is_foreground", "is_focused", "active")
+    )
+
+
+def _window_record_is_foreground(item: dict[str, Any]) -> bool:
+    return any(
+        bool(item.get(key))
+        for key in ("is_active", "is_foreground", "is_focused", "active")
+    )
 
 
 @tool(description="最小化指定窗口。title 为窗口标题。")

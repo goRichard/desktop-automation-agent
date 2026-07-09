@@ -735,6 +735,40 @@ WinPeekaboo 没有安装到当前虚拟环境。用 `python -m pip show winpeeka
 确认 `python -m winpeekaboo --help` 使用的是同一个虚拟环境。项目会用
 `sys.executable -m winpeekaboo` 启动它，不会使用其他 Python 环境中的命令。
 
+### `window restore/activate` 返回成功但窗口没有前置
+
+这通常不是参数拼写问题，而是 WinPeekaboo 或 Windows 前台窗口策略没有真正完成激活。
+先不要继续截图或点击，按下面顺序隔离：
+
+```powershell
+where winpeekaboo
+python -m pip show winpeekaboo
+python -c "import winpeekaboo; print(winpeekaboo.__file__)"
+python -m winpeekaboo list windows --json --filter "<窗口关键字>"
+```
+
+从 `list windows` 输出中复制实际窗口标题，并记录 `hwnd`、`process_name`、
+`is_active`、`is_foreground`、`is_focused`、`active`、`is_minimized` 和 `bounds`。
+然后执行：
+
+```powershell
+python -m winpeekaboo window restore --title "<实际窗口标题>"
+python -m winpeekaboo window activate --title "<实际窗口标题>"
+Start-Sleep -Milliseconds 800
+python -m winpeekaboo list windows --json --filter "<实际窗口标题>"
+```
+
+如果第二次 `list windows` 中目标窗口仍不是 foreground，优先检查：
+
+1. 终端和目标应用是否处于相同权限级别；管理员应用需要管理员终端。
+2. 是否在同一个交互式桌面会话中运行；锁屏、断开的 RDP 会话和无显示会话通常不可靠。
+3. 标题是否匹配到通知窗口、隐藏窗口或旧窗口；Teams/Outlook 标题会动态变化。
+4. 目标窗口是否最小化到托盘、被模态弹窗阻塞，或被系统安全弹窗阻止抢前台。
+5. 直接执行 `winpeekaboo` 是否和项目使用的 `python -m winpeekaboo` 指向同一安装来源。
+
+项目封装层会在 `window_activate` 和 `capture_image(window=...)` 后追加 foreground 校验。
+如果 WinPeekaboo 返回成功但窗口没有前置，Runtime 应返回明确错误，而不是继续错误截图。
+
 ### UIA 找不到元素
 
 依次记录：

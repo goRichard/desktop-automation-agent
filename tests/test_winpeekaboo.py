@@ -29,6 +29,31 @@ def test_winpeekaboo_command_timeout_is_reported(monkeypatch) -> None:
     assert captured["timeout"] == 3.0
 
 
+def test_window_activate_fails_when_verification_is_not_foreground(monkeypatch) -> None:
+    commands = []
+    windows = [
+        _window(1, "Microsoft Teams", "ms-teams.exe", active=False),
+        _window(2, "Inbox - Outlook", "OUTLOOK.EXE", active=True),
+    ]
+
+    def fake_run_wpb(*args, capture=True, timeout_seconds=None):
+        commands.append(args)
+        if args[:3] == ("list", "windows", "--json"):
+            return json.dumps(windows)
+        return ""
+
+    monkeypatch.setattr(winpeekaboo, "_run_wpb", fake_run_wpb)
+    monkeypatch.setattr(winpeekaboo.time, "sleep", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="reported activate success.*not foreground"):
+        winpeekaboo.window_activate("Microsoft Teams")
+
+    assert commands[:2] == [
+        ("window", "restore", "--title", "Microsoft Teams"),
+        ("window", "activate", "--title", "Microsoft Teams"),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_raw_element_scan_uses_bounded_timeout(monkeypatch) -> None:
     captured = {}
