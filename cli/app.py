@@ -80,7 +80,6 @@ def chat(session):
 
     # 屏蔽 Windows ProactorEventLoop 关闭时的 transport __del__ 噪音
     # （Python 3.12 + asyncio 子进程已知问题，不影响功能）
-    import sys
     _orig_unraisablehook = sys.unraisablehook
     def _suppress_loop_closed(unraisable):
         if isinstance(unraisable.exc_value, RuntimeError) and \
@@ -110,7 +109,15 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
                 label="Token 累计",
             )
 
+    def _show_execution_memory(event) -> None:
+        if event.type == "run.execution_memory":
+            display.print_execution_memory(
+                event.data["entry"],
+                size=event.data.get("size"),
+            )
+
     unsubscribe_usage = loop.event_bus.subscribe(_show_usage)
+    unsubscribe_execution_memory = loop.event_bus.subscribe(_show_execution_memory)
 
     # 历史记录文件
     history_dir = Path("./.agent_history")
@@ -236,6 +243,7 @@ async def _chat_loop(session_id: Optional[str] = None) -> None:
 
     # 关闭调度器
     unsubscribe_usage()
+    unsubscribe_execution_memory()
     from scheduler import shutdown_scheduler
     shutdown_scheduler()
 
@@ -261,7 +269,6 @@ async def _handle_builtin_command(cmd: str, loop) -> Optional[str]:
     """处理内置斜杠命令，返回 'exit' 表示退出"""
     parts = cmd.split(maxsplit=1)
     command = parts[0].lower()
-    args = parts[1] if len(parts) > 1 else ""
 
     if command in ("/exit", "/quit", "/q"):
         return "exit"
@@ -285,7 +292,7 @@ async def _handle_builtin_command(cmd: str, loop) -> Optional[str]:
         display.print_success(f"已创建新会话: {loop.session_id[:8]}...")
 
     elif command == "/history":
-        from memory import get_messages, messages_to_openai_format
+        from memory import get_messages
         msgs = get_messages(loop.session_id)
         if not msgs:
             display.print_info("当前会话暂无历史消息")

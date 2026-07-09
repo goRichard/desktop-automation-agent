@@ -260,6 +260,39 @@ async def test_send_tracks_compose_by_handle_when_title_is_subject_only(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_send_closure_tracks_selected_compose_not_same_title_windows(monkeypatch) -> None:
+    target = _window(2, "Untitled - Message (HTML)")
+    other = _window(3, "Untitled - Message (HTML)")
+    main = _window(1, "Inbox - Outlook")
+    snapshots = iter([[target, other, main], [other, main]])
+    activations = []
+    outlook._last_compose_window_key = "2"
+
+    async def fake_list_windows():
+        return json.dumps(next(snapshots))
+
+    async def fake_activate(title):
+        activations.append(title)
+        return "ok"
+
+    async def fake_hotkey(keys, window=None):
+        return "ok"
+
+    monkeypatch.setattr(outlook, "list_windows", fake_list_windows)
+    monkeypatch.setattr(outlook, "window_activate", fake_activate)
+    monkeypatch.setattr(outlook, "hotkey", fake_hotkey)
+
+    result = await outlook.outlook_send_message(
+        window="Untitled - Message (HTML)",
+        timeout_seconds=1,
+    )
+
+    assert result["data"]["windowClosed"] is True
+    assert activations == ["Untitled - Message (HTML)"]
+    assert outlook._last_compose_window_key is None
+
+
+@pytest.mark.asyncio
 async def test_send_reports_new_blocking_dialog(monkeypatch) -> None:
     compose = _window(2, "Status - Message (HTML)")
     main = _window(1, "Inbox - Outlook")

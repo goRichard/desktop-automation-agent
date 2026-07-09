@@ -382,14 +382,9 @@ async def outlook_send_message(
     timeout_seconds: float = 8.0,
 ) -> dict[str, Any]:
     before = await _list_window_records()
-    window = _select_compose_window_title(before, window)
-    matching_keys = {
-        _window_key(item)
-        for item in before
-        if _window_title(item).lower() == window.lower()
-    }
-    if not matching_keys:
-        raise OutlookAutomationError(f"Compose window was not found: {window}")
+    compose = _select_compose_window_record(before, window)
+    window = _window_title(compose)
+    matching_key = _window_key(compose)
 
     await window_activate(window)
     await asyncio.sleep(0.35)
@@ -399,7 +394,7 @@ async def outlook_send_message(
     await hotkey(keys="Alt+S")
     closed = await _wait_until(
         lambda records: not any(
-            _window_key(item) in matching_keys for item in records
+            _window_key(item) == matching_key for item in records
         ),
         timeout_seconds,
     )
@@ -446,13 +441,20 @@ def _select_compose_window_title(
     records: list[dict[str, Any]],
     preferred: Optional[str] = None,
 ) -> str:
+    return _window_title(_select_compose_window_record(records, preferred))
+
+
+def _select_compose_window_record(
+    records: list[dict[str, Any]],
+    preferred: Optional[str] = None,
+) -> dict[str, Any]:
     if _last_compose_window_key:
         remembered = [
             item for item in records
             if _window_key(item) == _last_compose_window_key
         ]
         if remembered:
-            return _window_title(remembered[0])
+            return remembered[0]
 
     candidates = [
         item
@@ -467,13 +469,13 @@ def _select_compose_window_title(
         ]
         if exact:
             _remember_compose_window(exact[0])
-            return _window_title(exact[0])
+            return exact[0]
     if not candidates:
         detail = f" (previous title: {preferred})" if preferred else ""
         raise OutlookAutomationError(f"Classic Outlook compose window was not found{detail}")
     selected = max(candidates, key=_window_priority)
     _remember_compose_window(selected)
-    return _window_title(selected)
+    return selected
 
 
 def _remember_compose_window(window: dict[str, Any]) -> None:

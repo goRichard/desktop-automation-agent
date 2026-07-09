@@ -3,16 +3,14 @@ Rich 渲染组件：终端 UI 展示
 """
 from __future__ import annotations
 
-from datetime import datetime
+import json
 from typing import Any
 
 from rich.console import Console
-from rich.live import Live
+from rich.markup import escape
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.table import Table
-from rich.text import Text
 from rich.theme import Theme
 
 # 全局控制台，统一主题
@@ -71,6 +69,58 @@ def print_tool_result(name: str, result: str) -> None:
     max_len = 500 if is_error else 200
     preview = result[:max_len] + "..." if len(result) > max_len else result
     console.print(f"  [tool_result]  └─ {name}: {preview}[/tool_result]")
+
+
+def print_execution_memory(entry: dict[str, Any], size: int | None = None) -> None:
+    """打印 Run execution_memory 的单步摘要。"""
+    sequence = entry.get("sequence") or size or "?"
+    step_label = _execution_step_label(entry)
+    tool = entry.get("tool") or "unknown"
+    success = bool(entry.get("success", True))
+    status = "✓" if success else "✗"
+    status_style = "success" if success else "error"
+    arguments = _compact_value(entry.get("arguments"), 160)
+    result = _compact_value(entry.get("result"), 180)
+    verification = _compact_value(entry.get("verification"), 140)
+
+    parts = [
+        f"[info]execution_memory #{sequence}[/info]",
+        f"[dim]{escape(step_label)}[/dim]",
+        f"[tool]{escape(str(tool))}[/tool]",
+        f"[{status_style}]{status}[/{status_style}]",
+    ]
+    if arguments not in ("", "null"):
+        parts.append(f"[dim]args={escape(arguments)}[/dim]")
+    if result not in ("", "null"):
+        parts.append(f"[tool_result]result={escape(result)}[/tool_result]")
+    if verification not in ("", "null"):
+        parts.append(f"[dim]verification={escape(verification)}[/dim]")
+
+    console.print("  " + " | ".join(parts))
+
+
+def _execution_step_label(entry: dict[str, Any]) -> str:
+    if entry.get("planStepId") is not None:
+        return f"plan step {entry.get('planStepId')}: {entry.get('planStep') or '-'}"
+    if entry.get("skillStepId") is not None:
+        return f"skill step {entry.get('skillStepId')}: {entry.get('skillStep') or '-'}"
+    return "step: -"
+
+
+def _compact_value(value: Any, max_len: int) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            text = str(value)
+    text = " ".join(text.split())
+    if len(text) > max_len:
+        text = text[: max_len - 3] + "..."
+    return text
 
 
 def print_agent_response(content: str) -> None:
@@ -362,7 +412,7 @@ def print_plan_progress(
     """
     console.print(f"\n[agent]📋 任务计划: {goal}[/agent]")
     console.print()
-    console.print(f"[bold]步骤  状态  描述[/bold]")
+    console.print("[bold]步骤  状态  描述[/bold]")
     console.print(f"[dim]{'─' * 60}[/dim]")
 
     for step_id, description, status, tool_used in steps:
