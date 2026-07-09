@@ -535,11 +535,12 @@ Runtime 会导入 `send-teams-message@1.0.0`。该 Skill 接收 `recipient`、`m
 `attachments`，执行路径为：
 
 ```text
-teams.launch -> Ctrl+N -> fillChat -> addAttachments -> click Send
+teams.launch -> Ctrl+N -> fillChat -> addAttachments -> keyboard submit
 ```
 
 附件菜单通过 UIA 匹配 `Actions and apps`、`Attach file`；系统文件对话框通过前台
-`Alt+N -> 路径 -> Enter` 完成，不调用视觉模型。发送步骤标记为
+`Alt+N -> 路径 -> Enter` 完成，不调用视觉模型。发送步骤会重新聚焦消息输入区并执行
+`Ctrl+Enter -> Enter`，不再扫描或点击 WebView 中的 Send 按钮。发送步骤标记为
 `external_side_effect`，但配置了 `requireConfirmation: false`，不会生成 `user.confirm`。
 `fillChat` 不再枚举新聊天 UIA 树；它通过 Teams 主窗口 bounds 计算收件人区和消息输入区
 的相对坐标，再执行点击、键盘输入和 `Enter` 选人，用于规避 New Teams WebView UIA
@@ -567,8 +568,8 @@ AutomationId，不要改用后台 Graph API 或模型坐标点击。
 
 如果 Run 停在 `teams_fill_chat`，首先检查错误阶段。错误中的 `window resolution`
 对应窗口枚举/窗口识别，`foreground input` 对应点击、键盘输入或窗口前台状态。
-当前 `teams_fill_chat` 不应再出现 `list elements` 超时；如果仍出现，说明运行的不是
-最新代码或调用链进入了附件/发送按钮的 UIA 匹配步骤。此时保留 Run 日志、当前 git
+当前 `teams_fill_chat` 和 `teams_send_message` 不应再出现 `list elements` 超时；如果仍
+出现，说明运行的不是最新代码或调用链进入了附件菜单的 UIA 匹配步骤。此时保留 Run 日志、当前 git
 commit、`python -m winpeekaboo list windows --json --filter "Teams"` 输出和 WinPeekaboo
 版本。
 

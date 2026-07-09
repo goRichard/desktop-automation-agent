@@ -152,32 +152,33 @@ async def test_attachment_dialog_uses_foreground_keyboard(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_send_uses_uia_button_and_no_confirmation_tool(monkeypatch) -> None:
+async def test_send_uses_keyboard_submit_and_no_uia_scan(monkeypatch) -> None:
     batches = []
 
-    async def fake_resolve(preferred=None):
-        return "Microsoft Teams"
+    async def fake_resolve_record(preferred=None):
+        return _window(2, "Microsoft Teams")
 
     async def fake_activate(title):
         return "ok"
 
     async def fake_list_elements(window):
-        return json.dumps([_element("Send", "Button", 900, 700, "send-button")])
+        raise AssertionError("teams_send_message must not run a UIA list_elements scan")
 
     async def fake_run_actions(actions):
         batches.append(json.loads(actions))
         return "ok"
 
-    async def no_sleep(*args):
-        return None
-
-    monkeypatch.setattr(teams, "_resolve_teams_window_title", fake_resolve)
+    monkeypatch.setattr(teams, "_resolve_teams_window_record", fake_resolve_record)
     monkeypatch.setattr(teams, "window_activate", fake_activate)
     monkeypatch.setattr(teams, "list_elements", fake_list_elements)
     monkeypatch.setattr(teams, "run_actions", fake_run_actions)
-    monkeypatch.setattr(teams.asyncio, "sleep", no_sleep)
 
     result = await teams.teams_send_message("Microsoft Teams")
 
-    assert result["data"]["method"] == "uia_click"
-    assert batches == [[{"tool": "click", "args": {"on": "950,715"}}]]
+    assert result["data"]["method"] == "keyboard_submit"
+    assert batches == [[
+        {"tool": "click", "args": {"on": "660,720"}},
+        {"tool": "hotkey", "args": {"keys": "Ctrl+Enter"}},
+        {"tool": "sleep", "args": {"seconds": 0.25}},
+        {"tool": "press_key", "args": {"key": "Enter"}},
+    ]]

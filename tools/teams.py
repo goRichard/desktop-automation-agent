@@ -166,18 +166,36 @@ async def teams_add_attachments(
     return _success("add_attachments", windowTitle=window, files=attached)
 
 
-@tool(description="通过确定性 UIA 匹配定位并点击 New Teams 当前聊天的 Send 按钮。")
+@tool(description="通过 New Teams 消息输入区键盘快捷键发送当前聊天消息；不扫描 Send 按钮 UIA。")
 async def teams_send_message(window: str) -> dict[str, Any]:
-    window = await _resolve_teams_window_title(window)
+    window_record = await _resolve_teams_window_record(window)
+    window = _window_title(window_record)
     await window_activate(window)
-    await _click_control(
-        window,
-        "Teams send button",
-        aliases=("Send", "Send message", "发送", "发送消息"),
-        automation_ids=("send-message-button", "send-button"),
-        control_types=("Button",),
+    message_x, message_y = _relative_window_point(
+        window_record,
+        x_ratio=0.55,
+        y_ratio=0.90,
+        fallback=(700, 720),
     )
-    return _success("send", windowTitle=window, method="uia_click")
+    actions = [
+        {"tool": "click", "args": {"on": f"{message_x},{message_y}"}},
+        {"tool": "hotkey", "args": {"keys": "Ctrl+Enter"}},
+        {"tool": "sleep", "args": {"seconds": 0.25}},
+        {"tool": "press_key", "args": {"key": "Enter"}},
+    ]
+    try:
+        output = await run_actions(json.dumps(actions, ensure_ascii=False))
+    except Exception as error:
+        raise TeamsAutomationError(
+            f"teams_send_message stopped during keyboard send: {error}"
+        ) from error
+    return _success(
+        "send",
+        windowTitle=window,
+        method="keyboard_submit",
+        actionCount=len(actions),
+        output=output,
+    )
 
 
 async def _click_control(

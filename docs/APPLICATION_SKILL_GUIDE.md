@@ -52,7 +52,7 @@ WinPeekaboo：窗口、UIA、鼠标、键盘和截图原子操作
 | 字段填写 | To/Cc/Subject/Body 一次扫描 | Recipient/Message 一次扫描 | 同一页面批量 UIA 扫描 |
 | 附件菜单 | Ribbon + `Browse This PC` | Actions and apps + Attach file | 菜单用 UIA，系统对话框用前台键盘 |
 | 系统文件对话框 | `Alt+N → 路径 → Enter` | `Alt+N → 路径 → Enter` | 不按对话框标题反复连接 |
-| 提交 | 前台 `Alt+S` | UIA 点击 Send | 高风险动作只执行一次 |
+| 提交 | 前台 `Alt+S` | 消息区聚焦后 `Ctrl+Enter`/`Enter` | 高风险动作只执行一次 |
 | 成功条件 | 写信窗口关闭 | 当前仅确认点击成功 | 新 Adapter 必须定义业务后置条件 |
 
 Teams 后续应补充强验证，例如消息编辑框清空、最新消息节点出现，或附件上传状态完成。

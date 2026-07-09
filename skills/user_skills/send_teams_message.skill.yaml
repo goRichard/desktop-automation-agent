@@ -82,7 +82,7 @@ execution:
       onFailure: stop
 
     - id: send-message
-      name: 点击 Send 发送 Teams 消息
+      name: 使用键盘快捷键发送 Teams 消息
       action: teams.send
       target:
         window: "{{ steps.open-new-chat.output.data.windowTitle }}"
