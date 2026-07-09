@@ -41,58 +41,33 @@ async def teams_open_new_chat(window: str) -> dict[str, Any]:
     return _success("open_new_chat", windowTitle=window, shortcut="Ctrl+N")
 
 
-@tool(description="使用一次 UIA 扫描定位 New Teams 新聊天的收件人和消息输入框，并填写内容。")
+@tool(description="在 New Teams 新聊天窗口使用窗口坐标和键盘填写收件人与消息；不执行大范围 UIA 扫描。")
 async def teams_fill_chat(
     window: str,
     recipient: str,
     message: str,
 ) -> dict[str, Any]:
     try:
-        window = await _resolve_teams_window_title(window)
+        window_record = await _resolve_teams_window_record(window)
+        window = _window_title(window_record)
     except Exception as error:
         raise TeamsAutomationError(
             f"teams_fill_chat stopped during window resolution: {error}"
         ) from error
     await window_activate(window)
-    try:
-        elements = await _scan_uia_elements(
-            window,
-            "Teams new chat",
-            attempts=2,
-        )
-    except TeamsAutomationError as error:
-        raise TeamsAutomationError(
-            f"teams_fill_chat stopped during UIA scan: {error}"
-        ) from error
-    recipient_point = _control_point(
-        elements,
-        aliases=(
-            "To", "Add people", "Enter name, email, or tag",
-            "Type a name or group", "收件人", "添加人员",
-        ),
-        automation_ids=("people-picker-input", "new-chat-people-picker"),
-        control_types=("Edit", "ComboBox"),
-    )
-    message_point = _control_point(
-        elements,
-        aliases=(
-            "Type a new message", "Type a message", "Message",
-            "Chat message", "键入新消息", "键入消息", "消息",
-        ),
-        automation_ids=("new-message", "message-compose-input"),
-        control_types=("Edit", "Document", "TextBox"),
-    )
-    if recipient_point is None:
-        raise TeamsAutomationError(
-            "Teams recipient field was not found: " + _element_summary(elements)
-        )
-    if message_point is None:
-        raise TeamsAutomationError(
-            "Teams message field was not found: " + _element_summary(elements)
-        )
 
-    recipient_x, recipient_y = recipient_point
-    message_x, message_y = message_point
+    recipient_x, recipient_y = _relative_window_point(
+        window_record,
+        x_ratio=0.43,
+        y_ratio=0.12,
+        fallback=(420, 120),
+    )
+    message_x, message_y = _relative_window_point(
+        window_record,
+        x_ratio=0.55,
+        y_ratio=0.90,
+        fallback=(700, 720),
+    )
     actions = [
         {"tool": "click", "args": {"on": f"{recipient_x},{recipient_y}"}},
         {"tool": "hotkey", "args": {"keys": "Ctrl+A"}},
@@ -112,6 +87,7 @@ async def teams_fill_chat(
     return _success(
         "fill_chat",
         windowTitle=window,
+        method="window_coordinates",
         recipient=recipient,
         actionCount=len(actions),
         output=output,
@@ -304,14 +280,18 @@ async def _list_window_records() -> list[dict[str, Any]]:
 
 
 async def _resolve_teams_window_title(preferred: Optional[str] = None) -> str:
+    return _window_title(await _resolve_teams_window_record(preferred))
+
+
+async def _resolve_teams_window_record(preferred: Optional[str] = None) -> dict[str, Any]:
     records = await _list_window_records()
     if _last_teams_window_key:
         remembered = [item for item in records if _window_key(item) == _last_teams_window_key]
         if remembered:
-            return _window_title(remembered[0])
+            return remembered[0]
     window = _select_teams_window(records, preferred)
     _remember_teams_window(window)
-    return _window_title(window)
+    return window
 
 
 def _select_teams_window(
@@ -405,6 +385,27 @@ def _element_center(element: dict[str, Any]) -> Optional[tuple[int, int]]:
     if width <= 0 or height <= 0:
         return None
     return x + width // 2, y + height // 2
+
+
+def _relative_window_point(
+    window: dict[str, Any],
+    x_ratio: float,
+    y_ratio: float,
+    fallback: tuple[int, int],
+) -> tuple[int, int]:
+    bounds = window.get("bounds")
+    if not isinstance(bounds, dict):
+        return fallback
+    try:
+        x = int(bounds.get("x", 0))
+        y = int(bounds.get("y", 0))
+        width = int(bounds.get("width", 0))
+        height = int(bounds.get("height", 0))
+    except (TypeError, ValueError):
+        return fallback
+    if width <= 0 or height <= 0:
+        return fallback
+    return x + round(width * x_ratio), y + round(height * y_ratio)
 
 
 def _normalize(value: str) -> str:

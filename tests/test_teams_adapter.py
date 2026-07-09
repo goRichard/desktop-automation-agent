@@ -38,27 +38,23 @@ def test_teams_window_selection_excludes_notification() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fill_chat_uses_one_scan_and_foreground_actions(monkeypatch) -> None:
-    elements = [
-        _element("To", "Edit", 100, 100, "people-picker-input"),
-        _element("Type a new message", "Document", 200, 300, "new-message"),
-    ]
+async def test_fill_chat_uses_window_coordinates_and_foreground_actions(monkeypatch) -> None:
     batches = []
 
-    async def fake_resolve(preferred=None):
-        return "Microsoft Teams"
+    async def fake_resolve_record(preferred=None):
+        return _window(2, "Microsoft Teams")
 
     async def fake_activate(title):
         return "ok"
 
     async def fake_list_elements(window):
-        return json.dumps(elements)
+        raise AssertionError("teams_fill_chat must not run a UIA list_elements scan")
 
     async def fake_run_actions(actions):
         batches.append(json.loads(actions))
         return "ok"
 
-    monkeypatch.setattr(teams, "_resolve_teams_window_title", fake_resolve)
+    monkeypatch.setattr(teams, "_resolve_teams_window_record", fake_resolve_record)
     monkeypatch.setattr(teams, "window_activate", fake_activate)
     monkeypatch.setattr(teams, "list_elements", fake_list_elements)
     monkeypatch.setattr(teams, "run_actions", fake_run_actions)
@@ -70,49 +66,38 @@ async def test_fill_chat_uses_one_scan_and_foreground_actions(monkeypatch) -> No
     )
 
     actions = batches[0]
+    assert result["data"]["method"] == "window_coordinates"
     assert result["data"]["recipient"] == "person@example.com"
-    assert actions[0] == {"tool": "click", "args": {"on": "150,115"}}
+    assert actions[0] == {"tool": "click", "args": {"on": "516,96"}}
     assert actions[2]["args"]["text"] == "person@example.com"
     assert actions[-1]["args"]["text"] == "Status update"
     assert all("window" not in action["args"] for action in actions)
 
 
 @pytest.mark.asyncio
-async def test_fill_chat_reports_uia_scan_timeout_stage(monkeypatch) -> None:
-    scans = 0
-
-    async def fake_resolve(preferred=None):
-        return "Microsoft Teams"
+async def test_fill_chat_reports_foreground_input_stage(monkeypatch) -> None:
+    async def fake_resolve_record(preferred=None):
+        return _window(2, "Microsoft Teams")
 
     async def fake_activate(title):
         return "ok"
 
-    async def fake_list_elements(window):
-        nonlocal scans
-        scans += 1
-        raise RuntimeError(
-            "winpeekaboo command timed out after 8.0s during list elements"
-        )
+    async def fake_run_actions(actions):
+        raise RuntimeError("input failed")
 
-    async def no_sleep(*args):
-        return None
-
-    monkeypatch.setattr(teams, "_resolve_teams_window_title", fake_resolve)
+    monkeypatch.setattr(teams, "_resolve_teams_window_record", fake_resolve_record)
     monkeypatch.setattr(teams, "window_activate", fake_activate)
-    monkeypatch.setattr(teams, "list_elements", fake_list_elements)
-    monkeypatch.setattr(teams.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(teams, "run_actions", fake_run_actions)
 
     with pytest.raises(
         teams.TeamsAutomationError,
-        match="teams_fill_chat stopped during UIA scan.*timed out",
+        match="teams_fill_chat stopped during foreground input.*input failed",
     ):
         await teams.teams_fill_chat(
             window="Microsoft Teams",
             recipient="person@example.com",
             message="hello",
         )
-
-    assert scans == 2
 
 
 @pytest.mark.asyncio
