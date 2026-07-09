@@ -9,11 +9,13 @@ from agent.loop import (
     _append_verification,
     _execution_memory_summary,
     _messages_with_execution_memory,
+    _messages_with_runtime_situation,
     _sanitize_action_value,
     _verification_target_window,
     _verification_wait_seconds,
 )
 from llm import ToolCall, VisionUnavailableError
+from runtime.observation import RuntimeObservation
 
 
 def test_verification_prefers_new_window_reported_by_tool() -> None:
@@ -376,3 +378,60 @@ def test_execution_memory_is_compact_and_redacts_secrets() -> None:
     )
     assert "当前 Run 的执行记忆" in messages[0]["content"]
     assert messages[1]["content"] == "go"
+
+
+def test_runtime_situation_includes_plan_window_and_recent_actions() -> None:
+    plan = AgentLoop._parse_plan(
+        "1. 填写 Teams 消息（teams_fill_chat）"
+    )
+    assert plan is not None
+    observation = RuntimeObservation(
+        captured_at="2026-07-09T00:00:00+00:00",
+        active_window={
+            "title": "Microsoft Teams",
+            "process": "ms-teams.exe",
+            "hwnd": "123",
+            "foreground": True,
+        },
+        visible_windows=[
+            {
+                "title": "Microsoft Teams",
+                "process": "ms-teams.exe",
+                "hwnd": "123",
+                "foreground": True,
+            },
+            {
+                "title": "Inbox - Outlook",
+                "process": "outlook.exe",
+                "hwnd": "456",
+                "foreground": False,
+            },
+        ],
+    )
+    memory = [{
+        "sequence": 1,
+        "planStepId": 1,
+        "tool": "find_and_click",
+        "arguments": {"target": "Send"},
+        "success": False,
+        "activeWindowAfter": "Microsoft Teams / ms-teams.exe",
+        "planCompliance": {
+            "status": "rejected_tool_not_allowed",
+            "expectedTools": ["teams_fill_chat"],
+        },
+    }]
+
+    messages = _messages_with_runtime_situation(
+        [{"role": "system", "content": "base"}, {"role": "user", "content": "go"}],
+        memory,
+        observation,
+        plan,
+        [{"function": {"name": "teams_fill_chat"}}],
+    )
+
+    content = messages[0]["content"]
+    assert "Runtime Situation" in content
+    assert "Microsoft Teams / ms-teams.exe" in content
+    assert "allowed tools now: ['teams_fill_chat']" in content
+    assert "rejected_tool_not_allowed" in content
+    assert "find_and_click" in content

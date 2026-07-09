@@ -226,7 +226,11 @@ agent:
 ```
 
 Run 同时维护结构化 `execution_memory`：记录计划/Skill 步骤、工具、脱敏参数、结果和验证
-状态。模型下一轮会收到最近 12 条精简记录，避免重复点击或输入；Run 最多持久化 100 条。
+状态。Agent 路径还会在每轮模型调用前采集轻量窗口状态，把当前前台窗口、可见窗口、当前
+计划步骤和 allowed tools 注入模型上下文；每次工具调用后记录 `activeWindowBefore`、
+`activeWindowAfter` 和 `planCompliance`。这不是完整审计日志，不保存每步截图或 UIA 树，
+但能帮助模型知道当前窗口、已执行动作，以及是否严格按计划调用工具。
+模型下一轮会收到最近 12 条精简记录，避免重复点击或输入；Run 最多持久化 100 条。
 `GET /runs/{id}` 返回该字段，Event 类型为 `run.execution_memory`。
 
 版本化 Skill 可使用 `ui.hotkey`、`ui.key` 和 `ui.actions` 绕过不必要的 Agent 推理。

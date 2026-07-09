@@ -24,6 +24,12 @@ from runtime import (
     desktop_execution_lock,
     get_runtime_persistence,
 )
+from runtime.observation import (
+    RuntimeObservation,
+    active_window_label,
+    collect_runtime_observation,
+    observation_summary,
+)
 from tools import get_all_schemas
 
 from . import context as ctx
@@ -255,9 +261,13 @@ class AgentLoop:
         for iteration in range(self.settings.max_iterations):
             await controller.checkpoint()
             iteration_tools = self._tools_for_current_plan_step(tools)
-            request_messages = _messages_with_execution_memory(
+            observation_for_context = await collect_runtime_observation()
+            request_messages = _messages_with_runtime_situation(
                 messages,
                 controller.state.execution_memory,
+                observation_for_context,
+                self._plan,
+                iteration_tools,
             )
             try:
                 response = await self.llm.chat(request_messages, tools=iteration_tools)
@@ -323,6 +333,8 @@ class AgentLoop:
                     if on_tool_call:
                         await _maybe_await(on_tool_call(tc.name, tc.arguments))
 
+                observation_before = await collect_runtime_observation()
+
                 unauthorized_tools = (
                     [
                         tool_call.name for tool_call in response.tool_calls
@@ -344,6 +356,12 @@ class AgentLoop:
                     )
                 else:
                     tool_results = await tool_dispatcher.execute(response.tool_calls)
+
+                observation_after = (
+                    observation_before
+                    if policy_error
+                    else await collect_runtime_observation()
+                )
 
                 # ── 分层验证：仅在检查点/窗口切换/高风险/最终步骤使用视觉模型 ──
                 verification = None
@@ -367,13 +385,18 @@ class AgentLoop:
                         if on_tool_result:
                             await _maybe_await(on_tool_result("verify_action_result", verification))
 
-                if not policy_error:
-                    await self._record_execution_memory(
-                        controller,
-                        response.tool_calls,
-                        tool_results,
-                        verification,
-                    )
+                await self._record_execution_memory(
+                    controller,
+                    response.tool_calls,
+                    tool_results,
+                    verification,
+                    observation_before=observation_before,
+                    observation_after=observation_after,
+                    compliance_status=(
+                        "rejected_tool_not_allowed" if policy_error else "compliant"
+                    ),
+                    compliance_reason=policy_error,
+                )
 
                 for tr in tool_results:
                     save_message(
@@ -873,6 +896,11 @@ class AgentLoop:
         tool_calls: list,
         tool_results: list[dict],
         verification: Optional[str],
+        *,
+        observation_before: Optional[RuntimeObservation] = None,
+        observation_after: Optional[RuntimeObservation] = None,
+        compliance_status: str = "compliant",
+        compliance_reason: Optional[str] = None,
     ) -> None:
         step = self._plan.current_step if self._plan else None
         result_by_id = {
@@ -889,6 +917,13 @@ class AgentLoop:
                 "success": bool(result.get("success", True)),
                 "result": str(result.get("content") or "")[:300],
                 "verification": verification,
+                "activeWindowBefore": active_window_label(observation_before),
+                "activeWindowAfter": active_window_label(observation_after),
+                "planCompliance": {
+                    "status": compliance_status,
+                    "reason": compliance_reason,
+                    "expectedTools": step.expected_tools if step else [],
+                },
             }
             await controller.record_execution_action(entry)
 
@@ -1073,6 +1108,21 @@ def _execution_memory_summary(execution_memory: list[dict], limit: int = 12) -> 
             f"- #{entry.get('sequence')} 步骤 {entry.get('planStepId')}: "
             f"{entry.get('tool')}({arguments[:180]}) -> {status}"
         )
+        active_after = entry.get("activeWindowAfter")
+        compliance = entry.get("planCompliance")
+        if active_after or compliance:
+            compliance_status = (
+                compliance.get("status")
+                if isinstance(compliance, dict)
+                else compliance
+            )
+            suffix = []
+            if active_after:
+                suffix.append(f"前台={active_after}")
+            if compliance_status:
+                suffix.append(f"计划一致性={compliance_status}")
+            if suffix:
+                lines[-1] += "；" + "；".join(suffix)
     return "\n".join(lines)
 
 
@@ -1082,10 +1132,32 @@ def _messages_with_execution_memory(
 ) -> list[dict[str, Any]]:
     if not execution_memory:
         return messages
+    return _messages_with_runtime_situation(
+        messages,
+        execution_memory,
+        observation=None,
+        plan=None,
+        allowed_tool_schemas=None,
+    )
+
+
+def _messages_with_runtime_situation(
+    messages: list[dict[str, Any]],
+    execution_memory: list[dict],
+    observation: Optional[RuntimeObservation],
+    plan: Optional[TaskPlan],
+    allowed_tool_schemas: Optional[list[dict]],
+) -> list[dict[str, Any]]:
+    memory_text = _execution_memory_summary(execution_memory)
+    plan_text = _plan_situation_summary(plan, allowed_tool_schemas)
     memory_prompt = (
-        "## 当前 Run 的执行记忆（由 Runtime 记录）\n"
-        f"{_execution_memory_summary(execution_memory)}\n"
+        "## Runtime Situation（由 Runtime 记录）\n"
+        f"{plan_text}\n\n"
+        f"{observation_summary(observation)}\n\n"
+        "最近动作（当前 Run 的执行记忆）：\n"
+        f"{memory_text}\n"
         "后续操作必须基于这些执行事实；不要重复成功的点击或输入，失败项可用于恢复判断。"
+        "如果当前步骤有 allowed tools，必须严格调用这些工具；不要自行替换为计划外工具。"
     )
     request_messages = [dict(message) for message in messages]
     if request_messages and request_messages[0].get("role") == "system":
@@ -1097,6 +1169,29 @@ def _messages_with_execution_memory(
     else:
         request_messages.insert(0, {"role": "system", "content": memory_prompt})
     return request_messages
+
+
+def _plan_situation_summary(
+    plan: Optional[TaskPlan],
+    allowed_tool_schemas: Optional[list[dict]],
+) -> str:
+    if not plan:
+        return "当前计划步骤：未启用确认计划"
+    step = plan.current_step
+    if step is None:
+        return "当前计划步骤：计划已完成"
+    allowed = [
+        schema["function"]["name"]
+        for schema in (allowed_tool_schemas or [])
+    ]
+    return (
+        "当前计划步骤：\n"
+        f"- step-{step.id}: {step.description}\n"
+        f"- status: {step.status.value}\n"
+        f"- expected tools: {step.expected_tools}\n"
+        f"- completed tools: {step.completed_tools}\n"
+        f"- allowed tools now: {allowed}"
+    )
 
 
 def _append_verification(tool_results: list[dict], verification: str) -> None:
