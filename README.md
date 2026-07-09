@@ -5,6 +5,7 @@
 
 产品设计见 [Electron MVP Spec](specs/electron_desktop_agent_mvp.md)。
 新增 Windows 应用时参考 [Application Skill Guide](docs/APPLICATION_SKILL_GUIDE.md)。
+首次 demo 沉淀为 Skill/Task 的规划见 [Demo-to-Task Recorder Plan](docs/DEMO_TO_TASK_RECORDER_PLAN.md)。
 
 准备在 Windows 实机或 VM 上运行时，请先阅读
 [Windows 运行与测试指南](docs/WINDOWS_RUNBOOK.md)。该文档包含环境准备、模型配置、
@@ -303,6 +304,10 @@ CLI / POST /runs (user_input) -> Agent Loop -> LLM Tool Calling -> WinPeekaboo
 使用 Runtime API 提交 `skillId: send-email` 或 `skillId: send-teams-message`；后续 Chat/UI 路由会先把自由文本解析为
 结构化 Skill 输入，再提交同一条 Runtime 路径。
 
+后续需要支持 demo-to-task：用户第一次通过对话或 step 模式跑通流程后，Runtime 从该 Run 的
+`execution_memory`、用户反馈和成功路径中生成 draft Skill；用户 validate/publish 后，再基于
+固定版本创建 Cron Task。该能力不等同于完整审计日志，第一版只保留流程复用所需的轻量记录。
+
 当前共注册 60 个工具，分布在：
 
 - `tools/winpeekaboo.py`：桌面原子操作。
@@ -362,6 +367,7 @@ python -m ruff check agent runtime skills tasks config credentials llm memory te
 3. 将工具结果统一为结构化格式。
 4. 将 Skill 演进为可编辑、可验证、可发布和可回滚的版本化流程。
 5. 增加本地 HTTP/WebSocket API。
-6. 接入 Electron、Task 页面和 Windows 独立打包。
+6. 增加 Demo-to-Task Recorder：从成功 demo 生成 draft Skill 和 Task 草稿。
+7. 接入 Electron、Task 页面和 Windows 独立打包。
 
 发布和定时打 Tag 的约定见 [RELEASING.md](RELEASING.md)。

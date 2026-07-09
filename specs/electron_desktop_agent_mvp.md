@@ -81,6 +81,7 @@ Electron Main Process
 Python Runtime Service
         ├── Agent Runtime
         ├── Skill Runtime
+        ├── Demo-to-Task Recorder
         ├── Task Scheduler
         ├── Tool Runtime
         │   ├── WinPeekaboo (Windows UIA / Win32 / Input / Screenshot)
@@ -101,6 +102,7 @@ Python Runtime Service
 
 - 管理会话、Agent 推理和工具调用。
 - 解析、校验、执行和版本化 Skill。
+- 将成功 demo Run、用户反馈和执行记忆转换为 draft Skill。
 - 执行 Cron Task。
 - 管理桌面自动化互斥锁。
 - 保存 Run、Step、截图、日志和用户反馈。
@@ -830,7 +832,14 @@ UI 自动化。Electron 可最小化到托盘；关闭主窗口时，已提交 R
 - 实现 Draft、Validate、Publish 和版本回滚。
 - 实现失败证据与 Skill Patch 建议。
 
-### Phase 3 — Electron MVP
+### Phase 3 — Demo-to-Task Recorder
+
+- 从成功 demo Run 中提取可复用步骤、输入参数和用户修正。
+- 过滤观察工具、失败路径和一次性调试动作。
+- 生成 draft Skill，并标记需要人工审查的坐标点击、视觉 fallback 和外部副作用。
+- 在 Skill validate/publish 后生成 Task draft，Task 仍必须绑定 published 固定版本。
+
+### Phase 4 — Electron MVP
 
 - Chat / Run 页面。
 - Skill 列表和编辑器。
@@ -838,20 +847,20 @@ UI 自动化。Electron 可最小化到托盘；关闭主窗口时，已提交 R
 - Settings 页面。
 - Windows `onedir` 开发构建和安装路径验证。
 
-### Phase 4 — Task Scheduler
+### Phase 5 — Task Scheduler
 
 - Task 编辑和 Cron 预览。
 - 无人值守运行前检查。
 - Task 历史、重试和失败记录。
 
-### Phase 5 — 首批应用稳定化
+### Phase 6 — 首批应用稳定化
 
 - Classic Outlook 应用适配器。
 - New Teams 应用适配器。
 - Microsoft Edge 浏览器适配器。
 - 建立首批端到端基准 Skill。
 
-### Phase 6 — Windows 发布
+### Phase 7 — Windows 发布
 
 - 构建 Electron 安装包。
 - 捆绑 Python Runtime 和 WinPeekaboo。
