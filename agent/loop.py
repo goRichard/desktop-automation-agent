@@ -30,7 +30,7 @@ from runtime.observation import (
     collect_runtime_observation,
     observation_summary,
 )
-from tools import get_all_schemas
+from tools import get_all_schemas, get_tool_metadata
 
 from . import context as ctx
 from . import tool_dispatcher
@@ -160,6 +160,7 @@ class AgentLoop:
         on_token: Optional[Any] = None,
         run_id: Optional[str] = None,
         run_controller: Optional[RunController] = None,
+        allow_tool_confirmation: bool = False,
     ) -> AsyncGenerator[str, None]:
         """创建受控 Run，串行占用桌面并转发执行输出。"""
         controller = run_controller or RunController(
@@ -193,6 +194,7 @@ class AgentLoop:
                         confirmed_plan=confirmed_plan,
                         on_token=on_token,
                         controller=controller,
+                        allow_tool_confirmation=allow_tool_confirmation,
                     ):
                         yield token
         except RunCancelled as error:
@@ -219,6 +221,7 @@ class AgentLoop:
         controller: Optional[RunController] = None,
         allowed_tool_names: Optional[set[str]] = None,
         finalize_run: bool = True,
+        allow_tool_confirmation: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         流式版本：先用非流式检测工具调用（多轮），最终回复用流式输出。
@@ -247,7 +250,8 @@ class AgentLoop:
         # 上下文必须在保存本轮消息前组装，否则数据库历史和下面追加的 user message
         # 会包含同一条输入两次。
         save_message(self.session_id, role=MessageRole.user, content=user_input)
-        tools = get_all_schemas()
+        policy_mode = _tool_policy_mode(controller)
+        tools = _filter_schemas_for_tool_policy_mode(get_all_schemas(), policy_mode)
         if allowed_tool_names:
             tools = [
                 schema for schema in tools
@@ -348,8 +352,19 @@ class AgentLoop:
                     if unauthorized_tools
                     else None
                 )
+                mode_policy_error = _tool_mode_policy_error(
+                    response.tool_calls,
+                    policy_mode,
+                )
                 plan_policy_error = self._begin_plan_step(response.tool_calls)
-                policy_error = tool_policy_error or plan_policy_error
+                policy_error = tool_policy_error or mode_policy_error or plan_policy_error
+                if not policy_error:
+                    policy_error = await _tool_confirmation_policy_error(
+                        controller,
+                        response.tool_calls,
+                        policy_mode,
+                        allow_tool_confirmation=allow_tool_confirmation,
+                    )
                 if policy_error:
                     tool_results = tool_dispatcher.rejected(
                         response.tool_calls, policy_error
@@ -570,6 +585,7 @@ class AgentLoop:
                 controller=controller,
                 allowed_tool_names=allowed_tool_names,
                 finalize_run=False,
+                allow_tool_confirmation=controller.state.execution_mode != "unattended",
             ):
                 output += token
         if controller.state.status == RunStatus.FAILED:
@@ -1124,6 +1140,76 @@ def _execution_memory_summary(execution_memory: list[dict], limit: int = 12) -> 
             if suffix:
                 lines[-1] += "；" + "；".join(suffix)
     return "\n".join(lines)
+
+
+def _tool_policy_mode(controller: RunController) -> str:
+    """Map Run metadata to the mode names used by tool registry metadata."""
+    if controller.state.execution_mode:
+        return str(controller.state.execution_mode)
+    return "agent"
+
+
+def _filter_schemas_for_tool_policy_mode(
+    schemas: list[dict[str, Any]],
+    mode: str,
+) -> list[dict[str, Any]]:
+    return [
+        schema for schema in schemas
+        if _tool_allowed_in_mode(schema["function"]["name"], mode)
+    ]
+
+
+def _tool_allowed_in_mode(tool_name: str, mode: str) -> bool:
+    metadata = get_tool_metadata(tool_name)
+    if metadata is None:
+        return True
+    allowed_modes = metadata.get("allowedModes") or []
+    return mode in allowed_modes
+
+
+def _tool_mode_policy_error(tool_calls: list, mode: str) -> Optional[str]:
+    blocked = [
+        tool_call.name for tool_call in tool_calls
+        if not _tool_allowed_in_mode(tool_call.name, mode)
+    ]
+    if not blocked:
+        return None
+    return f"Tool calls are not allowed in {mode} mode: {blocked}"
+
+
+async def _tool_confirmation_policy_error(
+    controller: RunController,
+    tool_calls: list,
+    mode: str,
+    *,
+    allow_tool_confirmation: bool,
+) -> Optional[str]:
+    required = []
+    for tool_call in tool_calls:
+        metadata = get_tool_metadata(tool_call.name)
+        if metadata and metadata.get("requiresConfirmation"):
+            required.append({
+                "name": tool_call.name,
+                "risk": metadata.get("risk"),
+                "sideEffect": metadata.get("sideEffect"),
+                "arguments": _sanitize_action_value(tool_call.arguments),
+            })
+    if not required:
+        return None
+
+    names = [item["name"] for item in required]
+    if not allow_tool_confirmation:
+        return f"Tool calls require explicit user confirmation: {names}"
+
+    approved = await controller.request_confirmation({
+        "type": "tool_policy",
+        "reason": "requires_confirmation",
+        "mode": mode,
+        "tools": required,
+    })
+    if not approved:
+        return f"User rejected tool calls requiring confirmation: {names}"
+    return None
 
 
 def _messages_with_execution_memory(

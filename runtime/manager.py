@@ -75,6 +75,7 @@ class RuntimeManager:
                 user_input=user_input,
                 confirmed_plan=confirmed_plan,
                 run_controller=controller,
+                allow_tool_confirmation=True,
             ):
                 pass
         except Exception:

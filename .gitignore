@@ -28,6 +28,7 @@ tests/vision_bbox/output/
 node_modules/
 desktop/dist/
 desktop/out/
+desktop/resources/runtime/
 release/
 
 # Editors and OS

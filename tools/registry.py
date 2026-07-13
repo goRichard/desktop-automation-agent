@@ -5,13 +5,17 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 from functools import wraps
-from typing import Any, Callable, Optional, get_type_hints
+from typing import Any, Callable, Literal, Optional, get_type_hints
+
+ToolRisk = Literal["read", "low", "medium", "high", "external_side_effect"]
 
 # 全局工具注册表
 _tools: dict[str, dict[str, Any]] = {}
 _tool_funcs: dict[str, Callable] = {}
+_tool_metadata: dict[str, dict[str, Any]] = {}
+_VALID_RISKS = {"read", "low", "medium", "high", "external_side_effect"}
+_DEFAULT_ALLOWED_MODES = ["agent", "step", "guided", "unattended"]
 
 
 def _python_type_to_json_schema(annotation) -> dict[str, Any]:
@@ -43,7 +47,15 @@ def _python_type_to_json_schema(annotation) -> dict[str, Any]:
         return {"type": "string"}
 
 
-def tool(description: str, name: Optional[str] = None):
+def tool(
+    description: str,
+    name: Optional[str] = None,
+    *,
+    risk: ToolRisk = "low",
+    side_effect: Optional[bool] = None,
+    requires_confirmation: Optional[bool] = None,
+    allowed_modes: Optional[list[str]] = None,
+):
     """
     装饰器：将函数注册为 Agent 可调用工具，自动生成 OpenAI function calling schema。
 
@@ -52,6 +64,9 @@ def tool(description: str, name: Optional[str] = None):
         async def capture_image(output: str, window: str = None) -> str:
             ...
     """
+    if risk not in _VALID_RISKS:
+        raise ValueError(f"Unsupported tool risk: {risk}")
+
     def decorator(func: Callable) -> Callable:
         tool_name = name or func.__name__
 
@@ -92,9 +107,6 @@ def tool(description: str, name: Optional[str] = None):
             },
         }
 
-        _tools[tool_name] = tool_schema
-        _tool_funcs[tool_name] = func
-
         @wraps(func)
         async def wrapper(*args, **kwargs):
             if asyncio.iscoroutinefunction(func):
@@ -105,6 +117,28 @@ def tool(description: str, name: Optional[str] = None):
 
         wrapper._is_tool = True
         wrapper._tool_name = tool_name
+        wrapper._tool_raw_func = func
+
+        _tools[tool_name] = tool_schema
+        # Store the same callable that direct imports receive. This keeps
+        # registry dispatch, adapter reuse, and tests on one async contract.
+        _tool_funcs[tool_name] = wrapper
+        effective_side_effect = (
+            risk not in {"read", "low"} if side_effect is None else side_effect
+        )
+        effective_requires_confirmation = (
+            risk in {"high", "external_side_effect"}
+            if requires_confirmation is None
+            else requires_confirmation
+        )
+        _tool_metadata[tool_name] = {
+            "name": tool_name,
+            "description": description,
+            "risk": risk,
+            "sideEffect": bool(effective_side_effect),
+            "requiresConfirmation": bool(effective_requires_confirmation),
+            "allowedModes": list(allowed_modes or _DEFAULT_ALLOWED_MODES),
+        }
         return wrapper
 
     return decorator
@@ -118,6 +152,23 @@ def get_all_schemas() -> list[dict[str, Any]]:
 def get_tool(name: str) -> Optional[Callable]:
     """根据名称获取工具函数"""
     return _tool_funcs.get(name)
+
+
+def get_tool_metadata(name: str) -> Optional[dict[str, Any]]:
+    """Return execution metadata for policy checks without changing LLM schema."""
+    metadata = _tool_metadata.get(name)
+    return _copy_metadata(metadata) if metadata else None
+
+
+def list_tool_metadata() -> list[dict[str, Any]]:
+    """Return all registered tool execution metadata."""
+    return [_copy_metadata(value) for value in _tool_metadata.values()]
+
+
+def _copy_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    value = dict(metadata)
+    value["allowedModes"] = list(value.get("allowedModes", []))
+    return value
 
 
 def list_tools() -> list[str]:

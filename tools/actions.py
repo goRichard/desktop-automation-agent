@@ -89,7 +89,11 @@ async def _dispatch(action: dict[str, Any]) -> str:
 # 公共工具
 # ─────────────────────────────────────────────────────────
 
-@tool(description="批量执行确定性桌面操作。actions 为 JSON 数组，每项包含 tool（工具名）和 args（参数字典）。适合连续无依赖操作如 click→type_text→press_key→sleep。返回每步结果。不支持需要视觉反馈的操作（find_and_click/analyze_image 等）。\n示例: [{\"tool\":\"click\",\"args\":{\"on\":\"100,200\"}},{\"tool\":\"type_text\",\"args\":{\"text\":\"Hello\"}},{\"tool\":\"press_key\",\"args\":{\"key\":\"enter\"}}]")
+@tool(
+    description="批量执行确定性桌面操作。actions 为 JSON 数组，每项包含 tool（工具名）和 args（参数字典）。适合连续无依赖操作如 click→type_text→press_key→sleep。返回每步结果。不支持需要视觉反馈的操作（find_and_click/analyze_image 等）。\n示例: [{\"tool\":\"click\",\"args\":{\"on\":\"100,200\"}},{\"tool\":\"type_text\",\"args\":{\"text\":\"Hello\"}},{\"tool\":\"press_key\",\"args\":{\"key\":\"enter\"}}]",
+    risk="medium",
+    side_effect=True,
+)
 async def run_actions(actions: str) -> str:
     """
     批量执行确定性桌面操作。

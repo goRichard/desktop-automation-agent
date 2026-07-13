@@ -47,7 +47,10 @@ from tools.registry import tool
         "timezone 为 IANA 时区；涉及发送等外部副作用时必须明确设置 external_side_effects_approved=true。"
         "name 为任务的人类可读描述。"
         "返回创建的任务 ID。"
-    )
+    ),
+    risk="high",
+    side_effect=True,
+    allowed_modes=["agent", "step", "guided"],
 )
 def create_job(
     cron: str,
@@ -113,7 +116,10 @@ def create_job(
     )
 
 
-@tool(description="列出所有定时任务（不含已删除的任务）。返回任务列表，包括 ID、名称、cron 表达式、状态、上次执行时间等信息。")
+@tool(
+    description="列出所有定时任务（不含已删除的任务）。返回任务列表，包括 ID、名称、cron 表达式、状态、上次执行时间等信息。",
+    risk="read",
+)
 def list_scheduled_jobs() -> str:
     tasks = TaskRepository().list()
     jobs = list_jobs(include_deleted=False)
@@ -140,7 +146,12 @@ def list_scheduled_jobs() -> str:
     return "\n".join(lines)
 
 
-@tool(description="删除指定的定时任务。job_id 为任务 ID（可通过 list_scheduled_jobs 获取）。删除后任务将从调度器中移除，不可恢复。")
+@tool(
+    description="删除指定的定时任务。job_id 为任务 ID（可通过 list_scheduled_jobs 获取）。删除后任务将从调度器中移除，不可恢复。",
+    risk="high",
+    side_effect=True,
+    allowed_modes=["agent", "step", "guided"],
+)
 def delete_job(job_id: str) -> str:
     task_repo = TaskRepository()
     try:
@@ -170,7 +181,13 @@ def delete_job(job_id: str) -> str:
     return f"✅ 已删除定时任务: {job.name}（ID: {job.id}）"
 
 
-@tool(description="暂停或恢复定时任务。job_id 为任务 ID，enabled=true 启用任务，enabled=false 暂停任务。暂停后任务不会执行，但保留在系统中。")
+@tool(
+    description="暂停或恢复定时任务。job_id 为任务 ID，enabled=true 启用任务，enabled=false 暂停任务。暂停后任务不会执行，但保留在系统中。",
+    risk="medium",
+    side_effect=True,
+    requires_confirmation=True,
+    allowed_modes=["agent", "step", "guided"],
+)
 def toggle_job(job_id: str, enabled: bool) -> str:
     task_repo = TaskRepository()
     try:

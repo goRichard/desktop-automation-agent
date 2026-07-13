@@ -44,7 +44,11 @@ _FIELD_ALIASES = {
 _last_compose_window_key: Optional[str] = None
 
 
-@tool(description="启动 Classic Outlook (outlook.exe)，返回检测到的 Outlook 主窗口标题。")
+@tool(
+    description="启动 Classic Outlook (outlook.exe)，返回检测到的 Outlook 主窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 async def outlook_launch_classic() -> dict[str, Any]:
     await app_launch(name="outlook.exe", wait=True)
     windows = await _list_window_records()
@@ -58,7 +62,11 @@ async def outlook_launch_classic() -> dict[str, Any]:
     return _success("launch", windowTitle=title, process="outlook.exe")
 
 
-@tool(description="切换 Classic Outlook 到邮件视图；使用确定性快捷键 Ctrl+1。")
+@tool(
+    description="切换 Classic Outlook 到邮件视图；使用确定性快捷键 Ctrl+1。",
+    risk="medium",
+    side_effect=True,
+)
 async def outlook_ensure_mail_view(window: str) -> dict[str, Any]:
     await window_activate(window)
     await hotkey(keys="Ctrl+1", window=window)
@@ -66,7 +74,11 @@ async def outlook_ensure_mail_view(window: str) -> dict[str, Any]:
     return _success("ensure_mail_view", windowTitle=window, shortcut="Ctrl+1")
 
 
-@tool(description="在 Classic Outlook 主窗口使用 Ctrl+N 新建邮件，并返回新写信窗口标题。")
+@tool(
+    description="在 Classic Outlook 主窗口使用 Ctrl+N 新建邮件，并返回新写信窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 async def outlook_open_compose(
     window: str,
     timeout_seconds: float = 8.0,
@@ -92,14 +104,22 @@ async def outlook_open_compose(
     return _success("open_compose", windowTitle=title, shortcut="Ctrl+N")
 
 
-@tool(description="重新解析并激活当前 Classic Outlook 写信窗口。")
+@tool(
+    description="重新解析并激活当前 Classic Outlook 写信窗口。",
+    risk="low",
+    side_effect=True,
+)
 async def outlook_resolve_compose() -> dict[str, Any]:
     title = await _resolve_compose_window_title()
     await window_activate(title)
     return _success("resolve_compose", windowTitle=title)
 
 
-@tool(description="使用一次 UIA 扫描和一次批量动作填写 Outlook 收件人、抄送、主题和正文。")
+@tool(
+    description="使用一次 UIA 扫描和一次批量动作填写 Outlook 收件人、抄送、主题和正文。",
+    risk="medium",
+    side_effect=True,
+)
 async def outlook_fill_message(
     window: str,
     recipient: str,
@@ -151,7 +171,11 @@ async def outlook_fill_message(
     )
 
 
-@tool(description="使用 Classic Outlook 键盘路径 Alt+N → A → F → Browse This PC 添加附件；文件对话框使用前台键盘输入，不按标题连接；空列表直接跳过。")
+@tool(
+    description="使用 Classic Outlook 键盘路径 Alt+N → A → F → Browse This PC 添加附件；文件对话框使用前台键盘输入，不按标题连接；空列表直接跳过。",
+    risk="medium",
+    side_effect=True,
+)
 async def outlook_add_attachments(
     window: str,
     paths: list[str],
@@ -376,7 +400,11 @@ def _element_summary(elements: list[dict[str, Any]], limit: int = 20) -> str:
     return json.dumps(summary, ensure_ascii=False)
 
 
-@tool(description="激活已确认的 Classic Outlook 写信窗口，等待焦点稳定后向前台发送 Alt+S，并确认窗口已关闭。")
+@tool(
+    description="激活已确认的 Classic Outlook 写信窗口，等待焦点稳定后向前台发送 Alt+S，并确认窗口已关闭。",
+    risk="external_side_effect",
+    side_effect=True,
+)
 async def outlook_send_message(
     window: str,
     timeout_seconds: float = 8.0,

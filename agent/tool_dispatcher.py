@@ -32,6 +32,8 @@ async def execute(tool_calls: list[ToolCall]) -> list[dict[str, Any]]:
             "success": outcome.success,
             "error": outcome.error,
             "data": outcome.data,
+            "artifacts": outcome.artifacts,
+            "durationMs": outcome.duration_ms,
         })
     return messages
 
@@ -47,6 +49,8 @@ def rejected(tool_calls: list[ToolCall], error: str) -> list[dict[str, Any]]:
             "success": False,
             "error": error,
             "data": None,
+            "artifacts": [],
+            "durationMs": None,
         }
         for tc in tool_calls
     ]
@@ -87,19 +91,36 @@ class _ExecutionOutcome:
     content: str
     error: str | None = None
     data: Any = None
+    artifacts: list[Any] | dict[str, Any] | None = None
+    duration_ms: int | float | None = None
 
 
 def _normalize_result(result: Any) -> _ExecutionOutcome:
-    """兼容旧字符串工具，并接受新工具返回的 {ok, data, error} 结构。"""
+    """
+    兼容旧字符串工具，并接受标准工具结果：
+    {ok, data, error, artifacts, durationMs}.
+    """
     if isinstance(result, dict) and "ok" in result:
         success = bool(result["ok"])
         content = json.dumps(result, ensure_ascii=False, default=str)
         error = None if success else str(result.get("error") or content)
-        return _ExecutionOutcome(success, content, error, result.get("data"))
+        return _ExecutionOutcome(
+            success=success,
+            content=content,
+            error=error,
+            data=result.get("data"),
+            artifacts=result.get("artifacts", []),
+            duration_ms=result.get("durationMs", result.get("duration_ms")),
+        )
 
     content = str(result) if result is not None else ""
     success = not _looks_like_error(content)
-    return _ExecutionOutcome(success, content, None if success else content)
+    return _ExecutionOutcome(
+        success=success,
+        content=content,
+        error=None if success else content,
+        artifacts=[],
+    )
 
 
 async def _execute_one(tc: ToolCall) -> _ExecutionOutcome:

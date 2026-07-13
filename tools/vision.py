@@ -107,7 +107,10 @@ async def _detect_and_activate_new_window(
 # 通用视觉分析
 # ══════════════════════════════════════════════════════
 
-@tool(description="截取当前屏幕或指定窗口，通过多模态视觉模型分析图像内容，返回文字描述或分析结果。仅用于理解界面内容（UI 布局、操作状态、页面信息），不用于定位元素坐标。prompt 为分析提示词（如'描述当前界面'或'这个页面有哪些操作选项'），window 为可选的目标窗口，region 为可选区域（x,y,width,height）。")
+@tool(
+    description="截取当前屏幕或指定窗口，通过多模态视觉模型分析图像内容，返回文字描述或分析结果。仅用于理解界面内容（UI 布局、操作状态、页面信息），不用于定位元素坐标。prompt 为分析提示词（如'描述当前界面'或'这个页面有哪些操作选项'），window 为可选的目标窗口，region 为可选区域（x,y,width,height）。",
+    risk="read",
+)
 async def analyze_screen(
     prompt: str,
     window: Optional[str] = None,
@@ -122,7 +125,10 @@ async def analyze_screen(
         return f"视觉分析失败: {type(e).__name__}: {e}"
 
 
-@tool(description="对指定图片文件进行视觉分析。image_path 为图片文件的绝对路径，prompt 为分析提示词。支持 PNG/JPG/WEBP 等格式。")
+@tool(
+    description="对指定图片文件进行视觉分析。image_path 为图片文件的绝对路径，prompt 为分析提示词。支持 PNG/JPG/WEBP 等格式。",
+    risk="read",
+)
 async def analyze_image(image_path: str, prompt: str) -> str:
     """
     对已有图片文件调用 vLLM Vision 模型进行分析
@@ -137,7 +143,10 @@ async def analyze_image(image_path: str, prompt: str) -> str:
         return f"图像分析失败: {type(e).__name__}: {e}"
 
 
-@tool(description="将图片（PNG/JPG/WEBP等）中的文字内容提取为 Markdown 格式。支持 OCR 文字识别、表格提取、结构化信息解析等场景。image_path 为图片文件路径，prompt 为可选的自定义提示词（默认提取所有文字和表格为 Markdown）。")
+@tool(
+    description="将图片（PNG/JPG/WEBP等）中的文字内容提取为 Markdown 格式。支持 OCR 文字识别、表格提取、结构化信息解析等场景。image_path 为图片文件路径，prompt 为可选的自定义提示词（默认提取所有文字和表格为 Markdown）。",
+    risk="read",
+)
 async def parse_image_to_markdown(
     image_path: str,
     prompt: Optional[str] = None,
@@ -168,7 +177,10 @@ async def parse_image_to_markdown(
         return f"图片解析失败: {type(e).__name__}: {e}"
 
 
-@tool(description="从图片中提取纯文字内容（OCR 功能）。适合只需要文字不需要格式的场景。image_path 为图片文件路径。")
+@tool(
+    description="从图片中提取纯文字内容（OCR 功能）。适合只需要文字不需要格式的场景。image_path 为图片文件路径。",
+    risk="read",
+)
 async def extract_text_from_image(image_path: str) -> str:
     """
     通过多模态视觉模型从图片中提取纯文字，不保留格式。
@@ -658,7 +670,10 @@ def _scale_vision_point(
 # 定位类工具：定位 UI 元素位置（不点击）
 # ══════════════════════════════════════════════════════
 
-@tool(description="压缩检查指定窗口的可交互 UIA 元素。仅返回最多 30 个候选的 key、name、control type 和 automation id，不返回完整 UIA JSON。通常应直接使用 find_and_click；只有目标名称或 automation_id 不明确时才调用本工具。query 可选，用于在本地优先排序候选；limit 默认 20。")
+@tool(
+    description="压缩检查指定窗口的可交互 UIA 元素。仅返回最多 30 个候选的 key、name、control type 和 automation id，不返回完整 UIA JSON。通常应直接使用 find_and_click；只有目标名称或 automation_id 不明确时才调用本工具。query 可选，用于在本地优先排序候选；limit 默认 20。",
+    risk="read",
+)
 async def inspect_elements(
     window: str,
     query: Optional[str] = None,
@@ -692,7 +707,10 @@ async def inspect_elements(
         header += f", omitted={len(elements) - len(candidates)}"
     return header + ("\n" + "\n".join(lines) if lines else "\n(no matching elements)")
 
-@tool(description="定位窗口中指定 UI 元素的位置，不执行点击。优先使用规范化 UIA 候选评分；候选有歧义时由 LLM 返回唯一 element key；无 automation_id 时才允许视觉兜底。显式 automation_id 为严格约束，未命中直接失败，不调用模型。")
+@tool(
+    description="定位窗口中指定 UI 元素的位置，不执行点击。优先使用规范化 UIA 候选评分；候选有歧义时由 LLM 返回唯一 element key；无 automation_id 时才允许视觉兜底。显式 automation_id 为严格约束，未命中直接失败，不调用模型。",
+    risk="read",
+)
 async def find_element(
     target: str,
     window: Optional[str] = None,
@@ -733,7 +751,7 @@ async def find_element(
 2. 带 automation_id 的对象数组（确定性匹配，零模型调用）：[{"target":"To","automation_id":"4142"},{"target":"Send","automation_id":"4098"}]
 两种格式可混用，无 automation_id 的目标自动走文本匹配。
 适用场景：填写表单（多个输入框+按钮）、邮件窗口（To/Cc/Subject/Send）等。
-返回格式：每个元素的 name、坐标(cx,cy)、来源(UIA/VLM)。""")
+返回格式：每个元素的 name、坐标(cx,cy)、来源(UIA/VLM)。""", risk="read")
 async def batch_locate_elements(
     targets: str,
     window: Optional[str] = None,
@@ -884,7 +902,11 @@ async def batch_locate_elements(
 # 组合类工具：定位 + 点击
 # ══════════════════════════════════════════════════════
 
-@tool(description="【推荐】在指定窗口中找到目标 UI 元素并点击。先使用规范化 UIA 候选评分，歧义时由 LLM 返回唯一 element key，无 UIA 候选时才使用视觉坐标。显式 automation_id 为严格约束，未命中直接失败。点击前校验坐标；可按需检测并激活同一应用进程的新窗口。")
+@tool(
+    description="【推荐】在指定窗口中找到目标 UI 元素并点击。先使用规范化 UIA 候选评分，歧义时由 LLM 返回唯一 element key，无 UIA 候选时才使用视觉坐标。显式 automation_id 为严格约束，未命中直接失败。点击前校验坐标；可按需检测并激活同一应用进程的新窗口。",
+    risk="medium",
+    side_effect=True,
+)
 async def find_and_click(
     target: str,
     window: Optional[str] = None,
@@ -949,7 +971,11 @@ async def find_and_click(
 # 批量类工具：UIA 一次扫描 + 逐个匹配 + VLM 兜底
 # ══════════════════════════════════════════════════════
 
-@tool(description="在指定窗口中找到多个 UI 元素并按顺序点击。UIA 只扫描一次，字符串匹配覆盖大部分场景（零模型调用），仅未匹配的目标才触发 VLM 批量兜底。targets 为 JSON 数组字符串，如 '[\"1\",\"2\",\"3\",\"+\",\"=\"]'。window 为可选窗口标题。")
+@tool(
+    description="在指定窗口中找到多个 UI 元素并按顺序点击。UIA 只扫描一次，字符串匹配覆盖大部分场景（零模型调用），仅未匹配的目标才触发 VLM 批量兜底。targets 为 JSON 数组字符串，如 '[\"1\",\"2\",\"3\",\"+\",\"=\"]'。window 为可选窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 async def find_and_click_batch(
     targets: str,
     window: Optional[str] = None,

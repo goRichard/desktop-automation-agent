@@ -266,7 +266,11 @@ def _format_elements(elements: list[dict]) -> str:
 # 浏览器工具
 # ══════════════════════════════════════════════════════
 
-@tool(description="打开指定 URL。首次调用时自动启动 Microsoft Edge（非 headless，用户可见）。url 为要访问的完整网址。仅当任务需要后续网页交互/自动化时使用。")
+@tool(
+    description="打开指定 URL。首次调用时自动启动 Microsoft Edge（非 headless，用户可见）。url 为要访问的完整网址。仅当任务需要后续网页交互/自动化时使用。",
+    risk="medium",
+    side_effect=True,
+)
 async def browser_navigate(url: str) -> str:
     """导航到指定 URL"""
     try:
@@ -279,7 +283,10 @@ async def browser_navigate(url: str) -> str:
         return f"browser_navigate 失败: {type(e).__name__}: {e}"
 
 
-@tool(description="获取当前浏览器页面状态：标题、URL、可交互元素列表。仅当浏览器已启动时可用。")
+@tool(
+    description="获取当前浏览器页面状态：标题、URL、可交互元素列表。仅当浏览器已启动时可用。",
+    risk="read",
+)
 async def browser_get_state() -> str:
     """返回页面结构化信息"""
     try:
@@ -346,7 +353,11 @@ async def _try_playwright_locators(
     return None
 
 
-@tool(description="点击浏览器页面中的元素。description 为元素的文字描述（如'搜索按钮'、'登录'、'下一页'）。优先使用 Playwright 定位器精确匹配，失败时回退到 DOM 扫描 + 语义匹配，最后用视觉模型兜底。操作前会自动等待页面加载完成。")
+@tool(
+    description="点击浏览器页面中的元素。description 为元素的文字描述（如'搜索按钮'、'登录'、'下一页'）。优先使用 Playwright 定位器精确匹配，失败时回退到 DOM 扫描 + 语义匹配，最后用视觉模型兜底。操作前会自动等待页面加载完成。",
+    risk="medium",
+    side_effect=True,
+)
 async def browser_click(description: str) -> str:
     """三层定位策略点击，加健壮的重试与诊断"""
     try:
@@ -409,7 +420,11 @@ async def browser_click(description: str) -> str:
         )
 
 
-@tool(description="在已打开的浏览器页面的输入框中输入文字。description 为输入框描述（如'搜索框'、'用户名'、'密码'），text 为要输入的文本。clear 为是否先清空（默认 True）。仅当浏览器已启动时可用。")
+@tool(
+    description="在已打开的浏览器页面的输入框中输入文字。description 为输入框描述（如'搜索框'、'用户名'、'密码'），text 为要输入的文本。clear 为是否先清空（默认 True）。仅当浏览器已启动时可用。",
+    risk="medium",
+    side_effect=True,
+)
 async def browser_type(description: str, text: str, clear: Optional[str] = "true") -> str:
     """定位输入框并输入文字"""
     should_clear = clear.lower() in ("true", "1", "yes") if clear else True
@@ -489,7 +504,7 @@ async def browser_type(description: str, text: str, clear: Optional[str] = "true
         )
 
 
-@tool(description="截取当前浏览器页面截图，保存到临时目录。返回截图文件路径。")
+@tool(description="截取当前浏览器页面截图，保存到临时目录。返回截图文件路径。", risk="read")
 async def browser_screenshot() -> str:
     """截取页面截图"""
     try:
@@ -504,7 +519,11 @@ async def browser_screenshot() -> str:
         return f"browser_screenshot 失败: {type(e).__name__}: {e}"
 
 
-@tool(description="滚动当前已打开的浏览器页面。direction 可选值：up（向上）、down（向下）、top（回到顶部）、bottom（到底部）。仅当浏览器已经打开（通过 browser_navigate 等）时可用，否则请用 scroll。")
+@tool(
+    description="滚动当前已打开的浏览器页面。direction 可选值：up（向上）、down（向下）、top（回到顶部）、bottom（到底部）。仅当浏览器已经打开（通过 browser_navigate 等）时可用，否则请用 scroll。",
+    risk="medium",
+    side_effect=True,
+)
 async def browser_scroll(direction: str = "down") -> str:
     """滚动页面"""
     try:
@@ -531,7 +550,7 @@ async def browser_scroll(direction: str = "down") -> str:
         return f"browser_scroll 失败: {type(e).__name__}: {e}"
 
 
-@tool(description="浏览器返回上一页。")
+@tool(description="浏览器返回上一页。", risk="medium", side_effect=True)
 async def browser_go_back() -> str:
     """返回上一页"""
     try:
@@ -544,7 +563,11 @@ async def browser_go_back() -> str:
         return f"browser_go_back 失败: {type(e).__name__}: {e}"
 
 
-@tool(description="在浏览器中按下键盘按键。key 为按键名称，如 'Enter'、'Tab'、'Escape'、'ArrowDown'、'Control+a' 等。")
+@tool(
+    description="在浏览器中按下键盘按键。key 为按键名称，如 'Enter'、'Tab'、'Escape'、'ArrowDown'、'Control+a' 等。",
+    risk="medium",
+    side_effect=True,
+)
 async def browser_press_key(key: str) -> str:
     """按下键盘按键"""
     try:
@@ -558,7 +581,7 @@ async def browser_press_key(key: str) -> str:
         return f"browser_press_key 失败: {type(e).__name__}: {e}"
 
 
-@tool(description="关闭浏览器，释放资源。仅当浏览器已启动时可用。")
+@tool(description="关闭浏览器，释放资源。仅当浏览器已启动时可用。", risk="medium", side_effect=True)
 async def browser_close() -> str:
     """关闭浏览器"""
     try:

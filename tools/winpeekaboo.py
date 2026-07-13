@@ -86,7 +86,10 @@ def _run_wpb(
 # 屏幕捕获
 # ══════════════════════════════════════════════════════
 
-@tool(description="截取屏幕截图，保存到指定文件。可指定目标窗口或区域（格式：x,y,width,height）。指定窗口时自动激活并前置窗口，确保截图内容正确。返回保存的文件路径。")
+@tool(
+    description="截取屏幕截图，保存到指定文件。可指定目标窗口或区域（格式：x,y,width,height）。指定窗口时自动激活并前置窗口，确保截图内容正确。返回保存的文件路径。",
+    risk="read",
+)
 def capture_image(
     output: str,
     window: Optional[str] = None,
@@ -125,7 +128,11 @@ def capture_image(
 # 鼠标操作
 # ══════════════════════════════════════════════════════
 
-@tool(description="⚠️ 仅供特殊场景：右键/中键/已知坐标。常规左键点击 UI 元素（按钮、菜单、链接等）请一律使用 find_and_click，定位更准且能自动激活新窗口。本工具仅用于：(1) 右键点击 button='right'；(2) 中键点击 button='middle'；(3) 已有精确坐标时传 '100,200'。")
+@tool(
+    description="⚠️ 仅供特殊场景：右键/中键/已知坐标。常规左键点击 UI 元素（按钮、菜单、链接等）请一律使用 find_and_click，定位更准且能自动激活新窗口。本工具仅用于：(1) 右键点击 button='right'；(2) 中键点击 button='middle'；(3) 已有精确坐标时传 '100,200'。",
+    risk="medium",
+    side_effect=True,
+)
 def click(
     on: str,
     window: Optional[str] = None,
@@ -142,7 +149,11 @@ def click(
     return f"已点击: {on}"
 
 
-@tool(description="滚动桌面鼠标滚轮（用于非浏览器窗口，如记事本、文件资源管理器、Office 等）。direction 可选 up/down/left/right，amount 为滚动格数（默认3）。可指定目标窗口。浏览器滚动请用 browser_scroll。")
+@tool(
+    description="滚动桌面鼠标滚轮（用于非浏览器窗口，如记事本、文件资源管理器、Office 等）。direction 可选 up/down/left/right，amount 为滚动格数（默认3）。可指定目标窗口。浏览器滚动请用 browser_scroll。",
+    risk="medium",
+    side_effect=True,
+)
 def scroll(
     direction: str,
     amount: Optional[int] = None,
@@ -159,7 +170,11 @@ def scroll(
     return f"已滚动: {direction} x{amount or 3}"
 
 
-@tool(description="拖放操作。from_ 为起点（坐标或元素名），to 为终点（坐标或元素名）。可指定目标窗口。")
+@tool(
+    description="拖放操作。from_ 为起点（坐标或元素名），to 为终点（坐标或元素名）。可指定目标窗口。",
+    risk="medium",
+    side_effect=True,
+)
 def drag(
     from_: str,
     to: str,
@@ -178,7 +193,11 @@ def drag(
 # 键盘操作
 # ══════════════════════════════════════════════════════
 
-@tool(description="在目标窗口（或当前焦点）中输入文本。delay 为每个字符之间的延迟秒数（模拟人工打字，默认0）。")
+@tool(
+    description="在目标窗口（或当前焦点）中输入文本。delay 为每个字符之间的延迟秒数（模拟人工打字，默认0）。",
+    risk="medium",
+    side_effect=True,
+)
 def type_text(
     text: str,
     window: Optional[str] = None,
@@ -195,7 +214,11 @@ def type_text(
     return f"已输入文本: {text[:50]}{'...' if len(text) > 50 else ''}"
 
 
-@tool(description="按下单个键。key 可以是 Enter/Escape/Tab/F1-F12/Delete/BackSpace/Up/Down/Left/Right 等。")
+@tool(
+    description="按下单个键。key 可以是 Enter/Escape/Tab/F1-F12/Delete/BackSpace/Up/Down/Left/Right 等。",
+    risk="medium",
+    side_effect=True,
+)
 def press_key(key: str) -> str:
     """winpeekaboo press --key {key}"""
     _run_wpb("press", "--key", key)
@@ -206,7 +229,11 @@ def press_key(key: str) -> str:
 _AUTO_DETECT_WINDOW_HOTKEYS = {"ctrl+n", "ctrl+shift+n", "ctrl+o"}
 
 
-@tool(description="执行键盘组合键。keys 格式如 'Ctrl+C'、'Ctrl+Shift+T'、'Alt+F4'。可指定目标窗口。Ctrl+N 等新建窗口快捷键会自动检测、激活并返回新窗口标题。")
+@tool(
+    description="执行键盘组合键。keys 格式如 'Ctrl+C'、'Ctrl+Shift+T'、'Alt+F4'。可指定目标窗口。Ctrl+N 等新建窗口快捷键会自动检测、激活并返回新窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 def hotkey(
     keys: str,
     window: Optional[str] = None,
@@ -351,7 +378,11 @@ def _window_record_priority(item: dict[str, Any]) -> tuple[int, int, int]:
 # 窗口管理
 # ══════════════════════════════════════════════════════
 
-@tool(description="激活（聚焦）指定窗口，将其置于前台。title 为窗口标题（支持部分匹配）。")
+@tool(
+    description="激活（聚焦）指定窗口，将其置于前台。title 为窗口标题（支持部分匹配）。",
+    risk="low",
+    side_effect=True,
+)
 def window_activate(title: str, timeout_seconds: float = 8.0) -> str:
     _restore_activate_and_verify(title, timeout_seconds=timeout_seconds)
     return f"已激活窗口: {title}"
@@ -457,37 +488,49 @@ def _window_record_is_foreground(item: dict[str, Any]) -> bool:
     )
 
 
-@tool(description="最小化指定窗口。title 为窗口标题。")
+@tool(description="最小化指定窗口。title 为窗口标题。", risk="medium", side_effect=True)
 def window_minimize(title: str) -> str:
     _run_wpb("window", "minimize", "--title", title)
     return f"已最小化: {title}"
 
 
-@tool(description="最大化指定窗口。title 为窗口标题。")
+@tool(description="最大化指定窗口。title 为窗口标题。", risk="medium", side_effect=True)
 def window_maximize(title: str) -> str:
     _run_wpb("window", "maximize", "--title", title)
     return f"已最大化: {title}"
 
 
-@tool(description="还原指定窗口（从最大化或最小化状态恢复）。title 为窗口标题。")
+@tool(
+    description="还原指定窗口（从最大化或最小化状态恢复）。title 为窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 def window_restore(title: str) -> str:
     _run_wpb("window", "restore", "--title", title)
     return f"已还原窗口: {title}"
 
 
-@tool(description="关闭指定窗口。title 为窗口标题。")
+@tool(description="关闭指定窗口。title 为窗口标题。", risk="medium", side_effect=True)
 def window_close(title: str) -> str:
     _run_wpb("window", "close", "--title", title)
     return f"已关闭窗口: {title}"
 
 
-@tool(description="移动指定窗口到屏幕指定位置。title 为窗口标题，x/y 为左上角坐标（像素）。")
+@tool(
+    description="移动指定窗口到屏幕指定位置。title 为窗口标题，x/y 为左上角坐标（像素）。",
+    risk="medium",
+    side_effect=True,
+)
 def window_move(title: str, x: int, y: int) -> str:
     _run_wpb("window", "move", "--title", title, "--x", str(x), "--y", str(y))
     return f"已移动窗口 {title} 到 ({x}, {y})"
 
 
-@tool(description="调整指定窗口大小。title 为窗口标题，width/height 为宽高（像素）。")
+@tool(
+    description="调整指定窗口大小。title 为窗口标题，width/height 为宽高（像素）。",
+    risk="medium",
+    side_effect=True,
+)
 def window_resize(title: str, width: int, height: int) -> str:
     _run_wpb("window", "resize", "--title", title, "--width", str(width), "--height", str(height))
     return f"已调整窗口 {title} 大小为 {width}x{height}"
@@ -497,7 +540,11 @@ def window_resize(title: str, width: int, height: int) -> str:
 # 应用管理
 # ══════════════════════════════════════════════════════
 
-@tool(description="启动并激活应用程序。name 为可执行文件名（如 notepad.exe）。args 为附加命令行参数。wait=True 时等待应用启动完成。启动后自动激活窗口到前台并返回窗口标题。")
+@tool(
+    description="启动并激活应用程序。name 为可执行文件名（如 notepad.exe）。args 为附加命令行参数。wait=True 时等待应用启动完成。启动后自动激活窗口到前台并返回窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 def app_launch(
     name: str,
     args: Optional[str] = None,
@@ -540,13 +587,17 @@ def app_launch(
     return result
 
 
-@tool(description="关闭/退出指定应用。name 为应用窗口标题或进程名。")
+@tool(description="关闭/退出指定应用。name 为应用窗口标题或进程名。", risk="medium", side_effect=True)
 def app_quit(name: str) -> str:
     _run_wpb("app", "quit", "--name", name)
     return f"已关闭应用: {name}"
 
 
-@tool(description="切换到指定应用（激活其窗口）。name 为应用窗口标题。")
+@tool(
+    description="切换到指定应用（激活其窗口）。name 为应用窗口标题。",
+    risk="low",
+    side_effect=True,
+)
 def app_switch(name: str) -> str:
     _run_wpb("app", "switch", "--name", name)
     return f"已切换到应用: {name}"
@@ -556,7 +607,10 @@ def app_switch(name: str) -> str:
 # 资源列表
 # ══════════════════════════════════════════════════════
 
-@tool(description="列出所有打开的窗口，返回 JSON 格式的窗口列表（包含标题、句柄等）。filter 为可选过滤关键字。")
+@tool(
+    description="列出所有打开的窗口，返回 JSON 格式的窗口列表（包含标题、句柄等）。filter 为可选过滤关键字。",
+    risk="read",
+)
 def list_windows(
     filter: Optional[str] = None,
     timeout_seconds: float = 8.0,
@@ -567,12 +621,12 @@ def list_windows(
     return _run_wpb(*args, timeout_seconds=timeout_seconds)
 
 
-@tool(description="列出所有正在运行的应用程序，返回 JSON 格式。")
+@tool(description="列出所有正在运行的应用程序，返回 JSON 格式。", risk="read")
 def list_apps() -> str:
     return _run_wpb("list", "apps", "--json")
 
 
-@tool(description="列出所有显示器/屏幕信息，返回 JSON 格式（包含分辨率、位置等）。")
+@tool(description="列出所有显示器/屏幕信息，返回 JSON 格式（包含分辨率、位置等）。", risk="read")
 def list_screens() -> str:
     return _run_wpb("list", "screens", "--json")
 

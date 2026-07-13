@@ -19,7 +19,11 @@ class TeamsAutomationError(RuntimeError):
 _last_teams_window_key: Optional[str] = None
 
 
-@tool(description="启动 New Microsoft Teams (ms-teams.exe)，返回主窗口标题。")
+@tool(
+    description="启动 New Microsoft Teams (ms-teams.exe)，返回主窗口标题。",
+    risk="medium",
+    side_effect=True,
+)
 async def teams_launch_new() -> dict[str, Any]:
     await app_launch(name="ms-teams.exe", wait=True)
     window = _select_teams_window(await _list_window_records())
@@ -29,7 +33,11 @@ async def teams_launch_new() -> dict[str, Any]:
     return _success("launch", windowTitle=title, process="ms-teams.exe")
 
 
-@tool(description="在 New Teams 主窗口使用 Ctrl+N 打开新聊天，并保持窗口前台。")
+@tool(
+    description="在 New Teams 主窗口使用 Ctrl+N 打开新聊天，并保持窗口前台。",
+    risk="medium",
+    side_effect=True,
+)
 async def teams_open_new_chat(window: str) -> dict[str, Any]:
     window = await _resolve_teams_window_title(window)
     await window_activate(window)
@@ -41,7 +49,11 @@ async def teams_open_new_chat(window: str) -> dict[str, Any]:
     return _success("open_new_chat", windowTitle=window, shortcut="Ctrl+N")
 
 
-@tool(description="在 New Teams 新聊天窗口使用窗口坐标和键盘填写收件人与消息；不执行大范围 UIA 扫描。")
+@tool(
+    description="在 New Teams 新聊天窗口使用窗口坐标和键盘填写收件人与消息；不执行大范围 UIA 扫描。",
+    risk="medium",
+    side_effect=True,
+)
 async def teams_fill_chat(
     window: str,
     recipient: str,
@@ -94,7 +106,11 @@ async def teams_fill_chat(
     )
 
 
-@tool(description="通过 New Teams 的 Actions and apps/Attach file 菜单添加本地附件；文件对话框使用前台键盘输入。")
+@tool(
+    description="通过 New Teams 的 Actions and apps/Attach file 菜单添加本地附件；文件对话框使用前台键盘输入。",
+    risk="medium",
+    side_effect=True,
+)
 async def teams_add_attachments(
     window: str,
     paths: list[str],
@@ -166,7 +182,11 @@ async def teams_add_attachments(
     return _success("add_attachments", windowTitle=window, files=attached)
 
 
-@tool(description="通过 New Teams 消息输入区键盘快捷键发送当前聊天消息；不扫描 Send 按钮 UIA。")
+@tool(
+    description="通过 New Teams 消息输入区键盘快捷键发送当前聊天消息；不扫描 Send 按钮 UIA。",
+    risk="external_side_effect",
+    side_effect=True,
+)
 async def teams_send_message(window: str) -> dict[str, Any]:
     window_record = await _resolve_teams_window_record(window)
     window = _window_title(window_record)

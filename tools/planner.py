@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from llm import get_llm_client
 from .registry import tool
+
+if TYPE_CHECKING:
+    from agent.planner import TaskPlan
 
 # 延迟导入避免循环依赖
 _plan_store: Optional["TaskPlan"] = None
@@ -24,7 +27,10 @@ def get_plan_store() -> Optional["TaskPlan"]:
     return _plan_store
 
 
-@tool(description="创建任务执行计划。将用户的复杂目标拆解为可执行的步骤列表。goal 为完整的目标描述。")
+@tool(
+    description="创建任务执行计划。将用户的复杂目标拆解为可执行的步骤列表。goal 为完整的目标描述。",
+    risk="low",
+)
 async def create_plan(goal: str) -> str:
     """
     调用 LLM 生成任务计划，返回格式化的步骤列表
@@ -83,7 +89,7 @@ async def create_plan(goal: str) -> str:
         return f"计划生成失败: {type(e).__name__}: {e}"
 
 
-@tool(description="获取当前任务的执行进度和状态。返回带状态标记的步骤列表。")
+@tool(description="获取当前任务的执行进度和状态。返回带状态标记的步骤列表。", risk="read")
 async def get_plan_status() -> str:
     """
     返回当前计划的进度和状态
@@ -98,8 +104,8 @@ async def get_plan_status() -> str:
 def _format_plan(plan: "TaskPlan") -> str:
     """格式化计划为可读文本"""
     lines = [f"📋 任务计划: {plan.goal}", ""]
-    lines.append(f"步骤  状态  描述")
-    lines.append(f"────  ────  ──────────────────────")
+    lines.append("步骤  状态  描述")
+    lines.append("────  ────  ──────────────────────")
 
     status_marks = {
         "pending": "○",
