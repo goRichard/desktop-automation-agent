@@ -166,7 +166,6 @@ async function createWindow(): Promise<void> {
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     await mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }

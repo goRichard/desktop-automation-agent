@@ -335,3 +335,13 @@ code {
   color: #62737a;
   padding: 14px 0;
 }
+
+.fatal-error {
+  margin: 24px;
+  padding: 16px;
+  border: 1px solid #e6bcbc;
+  border-radius: 8px;
+  background: #fbe7e7;
+  color: #8a1f1f;
+  white-space: pre-wrap;
+}

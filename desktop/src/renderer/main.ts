@@ -38,6 +38,15 @@ type SkillSummary = {
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root");
 
+window.addEventListener("error", (event) => {
+  app.innerHTML = `<pre class="fatal-error">${escapeHtml(event.message)}</pre>`;
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
+  app.innerHTML = `<pre class="fatal-error">${escapeHtml(reason)}</pre>`;
+});
+
 let runtimeState: RuntimeState | null = null;
 let selectedRunId: string | null = null;
 let selectedRun: RunState | null = null;
