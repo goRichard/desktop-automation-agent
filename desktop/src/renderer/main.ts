@@ -68,8 +68,6 @@ let promptIsComposing = false;
 let promptWasFocused = false;
 let uiError = "";
 
-const demoPrompt = "告诉 FlowPilot 你想在 Windows 桌面上完成什么";
-
 function html(strings: TemplateStringsArray, ...values: unknown[]): string {
   return strings.reduce((result, part, index) => {
     const value = values[index];
@@ -102,10 +100,17 @@ function shortId(id: string): string {
 }
 
 function currentTitle(): string {
-  if (activeView === "scheduled") return "已安排";
-  if (activeView === "task") return "新建任务";
   if (selectedRun) return selectedRun.user_input || selectedRun.id;
+  if (activeView === "task") return "新建任务";
+  if (activeView === "scheduled") return "已安排";
   return "新对话";
+}
+
+function composerPlaceholder(): string {
+  if (activeView === "task") {
+    return "描述要创建的一次性桌面任务，例如：打开记事本并输入测试内容";
+  }
+  return "输入你想让 FlowPilot 执行的桌面操作";
 }
 
 function render(): void {
@@ -118,16 +123,17 @@ function render(): void {
           <div class="brand-mark">F</div>
           <div>
             <h1>FlowPilot</h1>
-            <p>Desktop agent</p>
+            <p>Windows desktop agent</p>
           </div>
         </header>
 
+        <button id="new-chat" class="new-chat-button ${activeView === "chat" && !selectedRun ? "active" : ""}">
+          <span>+</span>
+          <strong>新对话</strong>
+        </button>
+
         <nav class="nav-list">
-          <button id="new-chat" class="nav-item ${activeView === "chat" && !selectedRun ? "active" : ""}">
-            <span>＋</span>
-            <strong>新对话</strong>
-          </button>
-          <button id="new-task" class="nav-item ${activeView === "task" ? "active" : ""}">
+          <button id="new-task" class="nav-item ${activeView === "task" && !selectedRun ? "active" : ""}">
             <span>▣</span>
             <strong>新建任务</strong>
           </button>
@@ -140,7 +146,7 @@ function render(): void {
         <section class="history-section">
           <div class="section-title">
             <span>聊天记录</span>
-            <button id="refresh-runs" class="icon-button" title="刷新">↻</button>
+            <button id="refresh-runs" class="icon-button" title="刷新聊天记录">↻</button>
           </div>
           <div class="run-list">
             ${runs.map((run) => html`
@@ -164,17 +170,17 @@ function render(): void {
         </footer>
       </aside>
 
-      <section class="chat-pane">
-        <header class="chat-header">
+      <section class="main-pane">
+        <header class="page-header">
           <div>
             <h2>${escapeHtml(currentTitle())}</h2>
-            <p>${activeView === "scheduled" ? "后续用于管理定时任务" : "像聊天一样描述你要完成的桌面操作"}</p>
+            <p>${renderSubtitle()}</p>
           </div>
           ${selectedRun ? badge(selectedRun.status) : ""}
         </header>
 
-        <section class="chat-scroll">
-          ${activeView === "scheduled" ? renderScheduledView() : selectedRun ? renderRunThread(selectedRun) : renderEmptyChat()}
+        <section class="page-scroll">
+          ${renderPageBody()}
         </section>
 
         ${activeView === "scheduled" ? "" : renderComposer(ready)}
@@ -185,20 +191,65 @@ function render(): void {
   restorePromptState();
 }
 
-function renderEmptyChat(): string {
+function renderSubtitle(): string {
+  if (activeView === "scheduled") return "管理后续计划执行的桌面任务";
+  if (activeView === "task" && !selectedRun) return "创建一个立即执行的一次性桌面任务";
+  return "像聊天一样描述你要完成的桌面操作";
+}
+
+function renderPageBody(): string {
+  if (activeView === "scheduled") return renderScheduledPage();
+  if (selectedRun) return renderRunThread(selectedRun);
+  if (activeView === "task") return renderTaskPage();
+  return renderChatPage();
+}
+
+function renderChatPage(): string {
   return html`
-    <div class="empty-chat">
+    <div class="center-panel">
       <h3>开始一个新对话</h3>
-      <p>在底部输入你想让 FlowPilot 执行的 Windows 桌面任务，例如打开应用、观察窗口、填写内容或执行安全命令。</p>
+      <p>在底部输入你想让 FlowPilot 执行的 Windows 桌面操作。发送后，它会创建一条运行记录，并在这里展示执行进度和结果。</p>
+      <div class="hint-grid">
+        <button class="prompt-suggestion" data-prompt="观察当前桌面窗口，并告诉我当前打开了什么">观察当前桌面</button>
+        <button class="prompt-suggestion" data-prompt="打开记事本，输入 Hello FlowPilot">打开记事本测试</button>
+      </div>
     </div>
   `;
 }
 
-function renderScheduledView(): string {
+function renderTaskPage(): string {
   return html`
-    <div class="empty-chat">
-      <h3>已安排</h3>
-      <p>这里会用于展示和管理 schedule job。当前先保留入口，后续接入任务创建、启停和执行历史。</p>
+    <div class="center-panel">
+      <h3>新建任务</h3>
+      <p>这里先创建立即执行的一次性任务。后续可以在这个页面扩展任务模板、参数、确认策略和执行前检查。</p>
+      <div class="task-layout">
+        <div class="task-card">
+          <strong>一次性桌面任务</strong>
+          <span>适合当前要马上测试的 WinPeekaboo 操作。</span>
+        </div>
+        <div class="task-card muted-card">
+          <strong>计划任务</strong>
+          <span>后续会接入到“已安排”页面进行管理。</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderScheduledPage(): string {
+  return html`
+    <div class="scheduled-page">
+      <div class="scheduled-header">
+        <div>
+          <h3>已安排</h3>
+          <p>用于后续管理 schedule job：查看任务、启停、编辑计划和检查执行历史。</p>
+        </div>
+        <button id="create-scheduled" class="secondary-button" disabled>新建安排</button>
+      </div>
+      <div class="empty-schedule">
+        <strong>暂无已安排任务</strong>
+        <span>当前版本先保留入口和页面结构，后续接入 schedule job API 后在这里展示列表。</span>
+      </div>
     </div>
   `;
 }
@@ -208,14 +259,14 @@ function renderRunThread(run: RunState): string {
   return html`
     <article class="message user-message">
       <div class="avatar">你</div>
-      <div class="message-body">
+      <div class="message-body user-bubble">
         <p>${escapeHtml(run.user_input)}</p>
       </div>
     </article>
 
     <article class="message assistant-message">
       <div class="avatar">F</div>
-      <div class="message-body">
+      <div class="message-body assistant-body">
         ${steps.length ? html`
           <div class="step-stack">
             ${steps.map((step, index) => html`
@@ -254,10 +305,10 @@ function renderComposer(ready: boolean): string {
   return html`
     <footer class="composer">
       <div class="composer-box">
-        <textarea id="prompt" placeholder="${demoPrompt}">${escapeHtml(promptDraft)}</textarea>
+        <textarea id="prompt" placeholder="${escapeHtml(composerPlaceholder())}">${escapeHtml(promptDraft)}</textarea>
         ${uiError ? `<div class="composer-error">${escapeHtml(uiError)}</div>` : ""}
         <div class="composer-bar">
-          <span>${ready ? "Runtime is ready" : "Runtime is offline"}</span>
+          <span>${ready ? "Enter 发送，Shift+Enter 换行" : "Runtime is offline"}</span>
           <button id="create-run" ${ready ? "" : "disabled"}>发送</button>
         </div>
       </div>
@@ -274,12 +325,15 @@ function bindEvents(): void {
   document.querySelector("#reject-run")?.addEventListener("click", () => confirmRun(false));
   document.querySelector("#new-chat")?.addEventListener("click", () => resetConversation("chat"));
   document.querySelector("#new-task")?.addEventListener("click", () => resetConversation("task"));
-  document.querySelector("#scheduled")?.addEventListener("click", () => {
-    activeView = "scheduled";
-    selectedRunId = null;
-    selectedRun = null;
-    uiError = "";
-    render();
+  document.querySelector("#scheduled")?.addEventListener("click", () => resetConversation("scheduled"));
+
+  document.querySelectorAll<HTMLButtonElement>(".prompt-suggestion").forEach((button) => {
+    button.addEventListener("click", () => {
+      promptDraft = button.dataset.prompt || "";
+      promptSelectionStart = promptDraft.length;
+      promptSelectionEnd = promptDraft.length;
+      render();
+    });
   });
 
   const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
