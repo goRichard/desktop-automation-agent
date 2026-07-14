@@ -8,10 +8,11 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --host 127.0.0.1",
-    "dev:electron": "npm run build:main && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
-    "build": "npm run build:renderer && npm run build:main",
+    "dev:electron": "npm run build:main && npm run build:preload && wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build": "npm run build:renderer && npm run build:main && npm run build:preload",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "node scripts/build-preload.mjs",
     "pack:win": "npm run build && electron-builder --win --x64",
     "stage:runtime": "node scripts/stage-runtime.mjs"
   },

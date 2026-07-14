@@ -158,7 +158,7 @@ async function createWindow(): Promise<void> {
     title: "SEWC FlowPilot",
     backgroundColor: "#f5f7f8",
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false
     }

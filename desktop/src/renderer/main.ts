@@ -38,6 +38,21 @@ type SkillSummary = {
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root");
 
+if (!window.flowpilot) {
+  app.innerHTML = `
+    <pre class="fatal-error">Electron preload did not expose window.flowpilot.
+
+请确认你是通过 Electron 启动，而不是直接用浏览器打开 Vite 页面。
+在 desktop 目录执行：
+
+npm run build
+npm run dev
+
+如果仍然出现这个错误，请检查 desktop/dist/main/preload.cjs 是否存在。</pre>
+  `;
+  throw new Error("Missing window.flowpilot preload bridge");
+}
+
 window.addEventListener("error", (event) => {
   app.innerHTML = `<pre class="fatal-error">${escapeHtml(event.message)}</pre>`;
 });
