@@ -95,6 +95,24 @@ async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   throw new Error(`Runtime did not listen on port ${port} within ${timeoutMs}ms`);
 }
 
+async function verifyRuntimeToken(): Promise<void> {
+  const response = await fetch(`${runtimeState.baseUrl}/runtime/capabilities`, {
+    headers: {
+      "X-Runtime-Token": runtimeToken
+    }
+  });
+  if (response.status === 401) {
+    throw new Error(
+      `Runtime on ${runtimeState.baseUrl} rejected this Electron token. ` +
+      "Stop any manually started flowpilot-runtime process on port 8765, then restart Electron."
+    );
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Runtime token verification failed: ${response.status} ${text}`);
+  }
+}
+
 async function startRuntime(): Promise<RuntimeState> {
   if (runtimeProcess && !runtimeProcess.killed) {
     return runtimeState;
@@ -134,6 +152,7 @@ async function startRuntime(): Promise<RuntimeState> {
 
   try {
     await waitForPort(runtimePort);
+    await verifyRuntimeToken();
     runtimeState.ready = true;
   } catch (error) {
     runtimeState.lastError = error instanceof Error ? error.message : String(error);
