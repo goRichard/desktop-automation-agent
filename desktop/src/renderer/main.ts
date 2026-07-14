@@ -18,22 +18,7 @@ type RunState = {
   }>;
 };
 
-type RunEvent = {
-  id: string;
-  run_id: string;
-  sequence: number;
-  type: string;
-  data: Record<string, unknown>;
-  timestamp: string;
-};
-
-type SkillSummary = {
-  id: string;
-  name: string;
-  latestVersion: string;
-  publishedVersion?: string | null;
-  description?: string;
-};
+type ViewMode = "chat" | "task" | "scheduled";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root");
@@ -73,11 +58,9 @@ window.addEventListener("unhandledrejection", (event) => {
 let runtimeState: RuntimeState | null = null;
 let selectedRunId: string | null = null;
 let selectedRun: RunState | null = null;
-let events: RunEvent[] = [];
 let runs: RunState[] = [];
-let skills: SkillSummary[] = [];
 let runtimeLogs: string[] = [];
-let modelStatus = "";
+let activeView: ViewMode = "chat";
 let promptDraft = "";
 let promptSelectionStart = 0;
 let promptSelectionEnd = 0;
@@ -85,7 +68,7 @@ let promptIsComposing = false;
 let promptWasFocused = false;
 let uiError = "";
 
-const demoPrompt = "打开记事本，输入 Hello FlowPilot";
+const demoPrompt = "告诉 FlowPilot 你想在 Windows 桌面上完成什么";
 
 function html(strings: TemplateStringsArray, ...values: unknown[]): string {
   return strings.reduce((result, part, index) => {
@@ -118,40 +101,46 @@ function shortId(id: string): string {
   return id.length > 10 ? `${id.slice(0, 8)}...` : id;
 }
 
-function compactTime(value?: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function currentTitle(): string {
+  if (activeView === "scheduled") return "已安排";
+  if (activeView === "task") return "新建任务";
+  if (selectedRun) return selectedRun.user_input || selectedRun.id;
+  return "新对话";
 }
 
 function render(): void {
   capturePromptState();
   const ready = Boolean(runtimeState?.ready);
   app.innerHTML = html`
-    <main class="codex-shell">
-      <aside class="activity-bar">
-        <div class="brand-mark">F</div>
-        <button id="new-run" class="rail-button active" title="新任务">+</button>
-        <button id="refresh-runs" class="rail-button" title="刷新任务">↻</button>
-        <button id="refresh-skills" class="rail-button" title="刷新技能">◇</button>
-      </aside>
-
-      <aside class="history-pane">
-        <header class="pane-header">
+    <main class="app-shell">
+      <aside class="sidebar">
+        <header class="brand">
+          <div class="brand-mark">F</div>
           <div>
             <h1>FlowPilot</h1>
             <p>Desktop agent</p>
           </div>
-          ${badge(ready ? "ready" : "offline")}
         </header>
 
-        <button id="new-run-wide" class="primary-action">New run</button>
+        <nav class="nav-list">
+          <button id="new-chat" class="nav-item ${activeView === "chat" && !selectedRun ? "active" : ""}">
+            <span>＋</span>
+            <strong>新对话</strong>
+          </button>
+          <button id="new-task" class="nav-item ${activeView === "task" ? "active" : ""}">
+            <span>▣</span>
+            <strong>新建任务</strong>
+          </button>
+          <button id="scheduled" class="nav-item ${activeView === "scheduled" ? "active" : ""}">
+            <span>◷</span>
+            <strong>已安排</strong>
+          </button>
+        </nav>
 
-        <section class="pane-section grow">
+        <section class="history-section">
           <div class="section-title">
-            <span>Runs</span>
-            <span>${runs.length}</span>
+            <span>聊天记录</span>
+            <button id="refresh-runs" class="icon-button" title="刷新">↻</button>
           </div>
           <div class="run-list">
             ${runs.map((run) => html`
@@ -162,70 +151,54 @@ function render(): void {
                   <span>${escapeHtml(shortId(run.id))}</span>
                 </span>
               </button>
-            `).join("") || `<div class="empty-state">No runs yet</div>`}
+            `).join("") || `<div class="empty-state">暂无聊天记录</div>`}
           </div>
         </section>
 
-        <section class="pane-section skills-compact">
-          <div class="section-title">
-            <span>Skills</span>
-            <span>${skills.length}</span>
+        <footer class="runtime-footer">
+          <div>
+            <span class="muted">Runtime</span>
+            ${badge(ready ? "ready" : "offline")}
           </div>
-          <div class="skill-list">
-            ${skills.slice(0, 8).map((skill) => html`
-              <div class="skill-row">
-                <strong>${escapeHtml(skill.name)}</strong>
-                <span>${escapeHtml(skill.publishedVersion || skill.latestVersion)}</span>
-              </div>
-            `).join("") || `<div class="empty-state">No skills loaded</div>`}
-          </div>
-        </section>
+          <button id="${ready ? "stop-runtime" : "start-runtime"}" class="small-button">${ready ? "Stop" : "Start"}</button>
+        </footer>
       </aside>
 
-      <section class="thread-pane">
-        <header class="thread-header">
-          <div class="thread-title">
-            <span class="eyebrow">Agent run</span>
-            <h2>${selectedRun ? escapeHtml(selectedRun.user_input || selectedRun.id) : "New desktop task"}</h2>
+      <section class="chat-pane">
+        <header class="chat-header">
+          <div>
+            <h2>${escapeHtml(currentTitle())}</h2>
+            <p>${activeView === "scheduled" ? "后续用于管理定时任务" : "像聊天一样描述你要完成的桌面操作"}</p>
           </div>
-          <div class="thread-actions">
-            ${selectedRun ? badge(selectedRun.status) : ""}
-            <button id="refresh-runtime" class="secondary-action">Runtime</button>
-          </div>
+          ${selectedRun ? badge(selectedRun.status) : ""}
         </header>
 
-        <section class="thread-scroll">
-          ${selectedRun ? renderRunThread(selectedRun) : renderEmptyThread()}
+        <section class="chat-scroll">
+          ${activeView === "scheduled" ? renderScheduledView() : selectedRun ? renderRunThread(selectedRun) : renderEmptyChat()}
         </section>
 
-        <footer class="composer">
-          <textarea id="prompt" placeholder="${demoPrompt}">${escapeHtml(promptDraft)}</textarea>
-          ${uiError ? `<div class="composer-error">${escapeHtml(uiError)}</div>` : ""}
-          <div class="composer-bar">
-            <span>${ready ? "Runtime is ready" : "Start runtime before running a task"}</span>
-            <button id="create-run" ${ready ? "" : "disabled"}>Run</button>
-          </div>
-        </footer>
+        ${activeView === "scheduled" ? "" : renderComposer(ready)}
       </section>
-
-      <aside class="inspector-pane">
-        ${renderRuntimeCard(ready)}
-        ${renderConfirmationCard()}
-        ${renderModelCard()}
-        ${renderEventsCard()}
-        ${renderLogCard()}
-      </aside>
     </main>
   `;
   bindEvents();
   restorePromptState();
 }
 
-function renderEmptyThread(): string {
+function renderEmptyChat(): string {
   return html`
-    <div class="empty-thread">
-      <h3>Start with a desktop instruction</h3>
-      <p>Describe what WinPeekaboo should do on the Windows desktop. The runtime, events, and confirmation prompts stay visible on the right.</p>
+    <div class="empty-chat">
+      <h3>开始一个新对话</h3>
+      <p>在底部输入你想让 FlowPilot 执行的 Windows 桌面任务，例如打开应用、观察窗口、填写内容或执行安全命令。</p>
+    </div>
+  `;
+}
+
+function renderScheduledView(): string {
+  return html`
+    <div class="empty-chat">
+      <h3>已安排</h3>
+      <p>这里会用于展示和管理 schedule job。当前先保留入口，后续接入任务创建、启停和执行历史。</p>
     </div>
   `;
 }
@@ -234,29 +207,41 @@ function renderRunThread(run: RunState): string {
   const steps = run.steps || [];
   return html`
     <article class="message user-message">
-      <div class="avatar">U</div>
+      <div class="avatar">你</div>
       <div class="message-body">
-        <div class="message-label">User</div>
         <p>${escapeHtml(run.user_input)}</p>
       </div>
     </article>
 
     <article class="message assistant-message">
-      <div class="avatar">A</div>
+      <div class="avatar">F</div>
       <div class="message-body">
-        <div class="message-label">FlowPilot</div>
-        <div class="step-stack">
-          ${steps.map((step, index) => html`
-            <div class="step-row">
-              <span class="step-index">${index + 1}</span>
-              <div>
-                <strong>${escapeHtml(step.name)}</strong>
-                <span>${escapeHtml((step.tool_names || []).join(", ") || step.result || step.error || "Waiting for result")}</span>
+        ${steps.length ? html`
+          <div class="step-stack">
+            ${steps.map((step, index) => html`
+              <div class="step-row">
+                <span class="step-index">${index + 1}</span>
+                <div>
+                  <strong>${escapeHtml(step.name)}</strong>
+                  <span>${escapeHtml((step.tool_names || []).join(", ") || step.result || step.error || "等待结果")}</span>
+                </div>
+                ${badge(step.status)}
               </div>
-              ${badge(step.status)}
+            `).join("")}
+          </div>
+        ` : `<p class="muted">正在执行...</p>`}
+
+        ${run.pending_confirmation ? html`
+          <div class="confirmation">
+            <strong>需要确认</strong>
+            <pre>${escapeHtml(JSON.stringify(run.pending_confirmation, null, 2))}</pre>
+            <div class="button-row">
+              <button id="confirm-run">Approve</button>
+              <button id="reject-run" class="danger-button">Reject</button>
             </div>
-          `).join("") || `<div class="pending-line">Waiting for the agent to produce steps...</div>`}
-        </div>
+          </div>
+        ` : ""}
+
         ${run.output || run.error ? html`
           <pre class="run-output">${escapeHtml(run.output || run.error)}</pre>
         ` : ""}
@@ -265,115 +250,38 @@ function renderRunThread(run: RunState): string {
   `;
 }
 
-function renderRuntimeCard(ready: boolean): string {
+function renderComposer(ready: boolean): string {
   return html`
-    <section class="inspector-card">
-      <div class="card-title">
-        <h3>Runtime</h3>
-        ${badge(ready ? "ready" : "offline")}
-      </div>
-      <dl class="facts">
-        <dt>Source</dt><dd>${escapeHtml(runtimeState?.source ?? "-")}</dd>
-        <dt>PID</dt><dd>${escapeHtml(runtimeState?.pid ?? "-")}</dd>
-        <dt>URL</dt><dd>${escapeHtml(runtimeState?.baseUrl ?? "-")}</dd>
-        <dt>Error</dt><dd>${escapeHtml(runtimeState?.lastError ?? "-")}</dd>
-      </dl>
-      <div class="button-row">
-        <button id="start-runtime">Start</button>
-        <button id="stop-runtime" class="secondary-action">Stop</button>
-      </div>
-    </section>
-  `;
-}
-
-function renderConfirmationCard(): string {
-  const pending = selectedRun?.pending_confirmation;
-  if (!pending) {
-    return html`
-      <section class="inspector-card quiet">
-        <div class="card-title">
-          <h3>Confirmation</h3>
-          ${badge("clear")}
+    <footer class="composer">
+      <div class="composer-box">
+        <textarea id="prompt" placeholder="${demoPrompt}">${escapeHtml(promptDraft)}</textarea>
+        ${uiError ? `<div class="composer-error">${escapeHtml(uiError)}</div>` : ""}
+        <div class="composer-bar">
+          <span>${ready ? "Runtime is ready" : "Runtime is offline"}</span>
+          <button id="create-run" ${ready ? "" : "disabled"}>发送</button>
         </div>
-        <p>No pending approval.</p>
-      </section>
-    `;
-  }
-
-  return html`
-    <section class="inspector-card attention">
-      <div class="card-title">
-        <h3>Confirmation</h3>
-        ${badge("waiting_user")}
       </div>
-      <pre class="data-block">${escapeHtml(JSON.stringify(pending, null, 2))}</pre>
-      <div class="button-row">
-        <button id="confirm-run">Approve</button>
-        <button id="reject-run" class="danger-action">Reject</button>
-      </div>
-    </section>
-  `;
-}
-
-function renderModelCard(): string {
-  return html`
-    <section class="inspector-card">
-      <div class="card-title">
-        <h3>Models</h3>
-        <button id="model-health" class="secondary-action">Health</button>
-      </div>
-      <pre id="model-status" class="data-block compact">${escapeHtml(modelStatus || "Not checked")}</pre>
-    </section>
-  `;
-}
-
-function renderEventsCard(): string {
-  const visibleEvents = events.slice(-12).reverse();
-  return html`
-    <section class="inspector-card grow-card">
-      <div class="card-title">
-        <h3>Events</h3>
-        <span>${visibleEvents.length}</span>
-      </div>
-      <div class="event-list">
-        ${visibleEvents.map((event) => html`
-          <div class="event-row">
-            <div>
-              <strong>${escapeHtml(event.sequence)} ${escapeHtml(event.type)}</strong>
-              <span>${escapeHtml(compactTime(event.timestamp))}</span>
-            </div>
-            <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
-          </div>
-        `).join("") || `<div class="empty-state">No events</div>`}
-      </div>
-    </section>
-  `;
-}
-
-function renderLogCard(): string {
-  return html`
-    <section class="inspector-card log-card">
-      <div class="card-title">
-        <h3>Runtime log</h3>
-        <span>${runtimeLogs.length}</span>
-      </div>
-      <pre class="runtime-log">${escapeHtml(runtimeLogs.slice(-80).join("\n"))}</pre>
-    </section>
+    </footer>
   `;
 }
 
 function bindEvents(): void {
-  document.querySelector("#refresh-runtime")?.addEventListener("click", refreshRuntime);
   document.querySelector("#start-runtime")?.addEventListener("click", startRuntime);
   document.querySelector("#stop-runtime")?.addEventListener("click", stopRuntime);
   document.querySelector("#create-run")?.addEventListener("click", createRun);
   document.querySelector("#refresh-runs")?.addEventListener("click", refreshRuns);
-  document.querySelector("#refresh-skills")?.addEventListener("click", refreshSkills);
-  document.querySelector("#model-health")?.addEventListener("click", checkModelHealth);
   document.querySelector("#confirm-run")?.addEventListener("click", () => confirmRun(true));
   document.querySelector("#reject-run")?.addEventListener("click", () => confirmRun(false));
-  document.querySelector("#new-run")?.addEventListener("click", resetComposer);
-  document.querySelector("#new-run-wide")?.addEventListener("click", resetComposer);
+  document.querySelector("#new-chat")?.addEventListener("click", () => resetConversation("chat"));
+  document.querySelector("#new-task")?.addEventListener("click", () => resetConversation("task"));
+  document.querySelector("#scheduled")?.addEventListener("click", () => {
+    activeView = "scheduled";
+    selectedRunId = null;
+    selectedRun = null;
+    uiError = "";
+    render();
+  });
+
   const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
   prompt?.addEventListener("input", () => {
     promptDraft = prompt.value;
@@ -384,6 +292,12 @@ function bindEvents(): void {
   prompt?.addEventListener("select", () => {
     promptSelectionStart = prompt.selectionStart;
     promptSelectionEnd = prompt.selectionEnd;
+  });
+  prompt?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !promptIsComposing) {
+      event.preventDefault();
+      createRun();
+    }
   });
   prompt?.addEventListener("compositionstart", () => {
     promptIsComposing = true;
@@ -397,16 +311,17 @@ function bindEvents(): void {
 
   document.querySelectorAll<HTMLButtonElement>(".run-item").forEach((button) => {
     button.addEventListener("click", () => {
+      activeView = "chat";
       selectedRunId = button.dataset.runId || null;
       refreshSelectedRun();
     });
   });
 }
 
-function resetComposer(): void {
+function resetConversation(mode: ViewMode): void {
+  activeView = mode;
   selectedRunId = null;
   selectedRun = null;
-  events = [];
   uiError = "";
   render();
 }
@@ -461,6 +376,7 @@ async function createRun(): Promise<void> {
 
   try {
     const run = await api<RunState>("/runs", "POST", { user_input: input });
+    activeView = "chat";
     selectedRunId = run.id;
     selectedRun = run;
     promptDraft = "";
@@ -478,19 +394,12 @@ async function createRun(): Promise<void> {
 
 async function refreshRuns(): Promise<void> {
   runs = await api<RunState[]>("/runs");
-  if (!selectedRunId && runs.length) selectedRunId = runs[0].id;
   render();
 }
 
 async function refreshSelectedRun(): Promise<void> {
   if (!selectedRunId) return;
   selectedRun = await api<RunState>(`/runs/${selectedRunId}`);
-  events = await api<RunEvent[]>(`/runs/${selectedRunId}/events`);
-  render();
-}
-
-async function refreshSkills(): Promise<void> {
-  skills = await api<SkillSummary[]>("/skills");
   render();
 }
 
@@ -500,22 +409,10 @@ async function confirmRun(approved: boolean): Promise<void> {
   await refreshSelectedRun();
 }
 
-async function checkModelHealth(): Promise<void> {
-  modelStatus = "checking...";
-  render();
-  try {
-    const result = await api("/models/chat/health?probe=configuration", "POST");
-    modelStatus = JSON.stringify(result, null, 2);
-  } catch (error) {
-    modelStatus = error instanceof Error ? error.message : String(error);
-  }
-  render();
-}
-
 async function refreshAll(): Promise<void> {
   try {
     await refreshRuntime();
-    await Promise.all([refreshRuns(), refreshSkills()]);
+    await refreshRuns();
     if (selectedRunId) await refreshSelectedRun();
   } catch (error) {
     runtimeLogs.push(error instanceof Error ? error.message : String(error));
