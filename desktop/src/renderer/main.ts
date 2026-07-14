@@ -38,6 +38,14 @@ type SkillSummary = {
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Missing app root");
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 if (!window.flowpilot) {
   app.innerHTML = `
     <pre class="fatal-error">Electron preload did not expose window.flowpilot.
@@ -69,6 +77,7 @@ let events: RunEvent[] = [];
 let runs: RunState[] = [];
 let skills: SkillSummary[] = [];
 let runtimeLogs: string[] = [];
+let modelStatus = "";
 
 const demoPrompt = "打开记事本，输入 Hello FlowPilot";
 
@@ -77,14 +86,6 @@ function html(strings: TemplateStringsArray, ...values: unknown[]): string {
     const value = values[index];
     return result + part + (value === undefined ? "" : String(value));
   }, "");
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -97,159 +98,258 @@ async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> 
 
 function badge(status: string): string {
   const normalized = status.toLowerCase();
-  const tone = ["succeeded", "healthy", "ok", "active"].includes(normalized)
+  const tone = ["succeeded", "healthy", "ok", "active", "ready"].includes(normalized)
     ? "good"
-    : ["failed", "cancelled", "unhealthy"].includes(normalized)
+    : ["failed", "cancelled", "unhealthy", "offline"].includes(normalized)
       ? "bad"
-      : ["waiting_user", "paused", "queued", "preparing"].includes(normalized)
+      : ["waiting_user", "paused", "queued", "preparing", "running"].includes(normalized)
         ? "warn"
         : "neutral";
   return `<span class="badge ${tone}">${escapeHtml(status)}</span>`;
 }
 
+function shortId(id: string): string {
+  return id.length > 10 ? `${id.slice(0, 8)}...` : id;
+}
+
+function compactTime(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function render(): void {
-  const ready = runtimeState?.ready;
+  const ready = Boolean(runtimeState?.ready);
   app.innerHTML = html`
-    <main class="shell">
-      <aside class="sidebar">
-        <div class="brand">
+    <main class="codex-shell">
+      <aside class="activity-bar">
+        <div class="brand-mark">F</div>
+        <button id="new-run" class="rail-button active" title="新任务">+</button>
+        <button id="refresh-runs" class="rail-button" title="刷新任务">↻</button>
+        <button id="refresh-skills" class="rail-button" title="刷新技能">◇</button>
+      </aside>
+
+      <aside class="history-pane">
+        <header class="pane-header">
           <div>
-            <h1>SEWC FlowPilot</h1>
-            <p>Windows desktop automation runtime</p>
+            <h1>FlowPilot</h1>
+            <p>Desktop agent</p>
           </div>
           ${badge(ready ? "ready" : "offline")}
-        </div>
+        </header>
 
-        <section class="panel">
-          <div class="panel-title">
-            <h2>Runtime</h2>
-            <button id="refresh-runtime" class="icon-button" title="刷新">↻</button>
+        <button id="new-run-wide" class="primary-action">New run</button>
+
+        <section class="pane-section grow">
+          <div class="section-title">
+            <span>Runs</span>
+            <span>${runs.length}</span>
           </div>
-          <dl class="facts">
-            <dt>Source</dt><dd>${escapeHtml(runtimeState?.source ?? "-")}</dd>
-            <dt>PID</dt><dd>${escapeHtml(runtimeState?.pid ?? "-")}</dd>
-            <dt>URL</dt><dd>${escapeHtml(runtimeState?.baseUrl ?? "-")}</dd>
-            <dt>Error</dt><dd>${escapeHtml(runtimeState?.lastError ?? "-")}</dd>
-          </dl>
-          <div class="button-row">
-            <button id="start-runtime">Start</button>
-            <button id="stop-runtime" class="secondary">Stop</button>
+          <div class="run-list">
+            ${runs.map((run) => html`
+              <button class="run-item ${run.id === selectedRunId ? "selected" : ""}" data-run-id="${escapeHtml(run.id)}">
+                <span class="run-title">${escapeHtml(run.user_input || run.id)}</span>
+                <span class="run-meta">
+                  ${badge(run.status)}
+                  <span>${escapeHtml(shortId(run.id))}</span>
+                </span>
+              </button>
+            `).join("") || `<div class="empty-state">No runs yet</div>`}
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-title">
-            <h2>Models</h2>
-            <button id="model-health" class="secondary">Health</button>
+        <section class="pane-section skills-compact">
+          <div class="section-title">
+            <span>Skills</span>
+            <span>${skills.length}</span>
           </div>
-          <pre id="model-status" class="compact-log"></pre>
-        </section>
-
-        <section class="panel grow">
-          <div class="panel-title">
-            <h2>Runtime Log</h2>
+          <div class="skill-list">
+            ${skills.slice(0, 8).map((skill) => html`
+              <div class="skill-row">
+                <strong>${escapeHtml(skill.name)}</strong>
+                <span>${escapeHtml(skill.publishedVersion || skill.latestVersion)}</span>
+              </div>
+            `).join("") || `<div class="empty-state">No skills loaded</div>`}
           </div>
-          <pre class="runtime-log">${escapeHtml(runtimeLogs.slice(-80).join("\n"))}</pre>
         </section>
       </aside>
 
-      <section class="workspace">
-        <section class="run-composer">
-          <textarea id="prompt" placeholder="${demoPrompt}"></textarea>
-          <div class="composer-actions">
-            <button id="create-run">Run Agent</button>
-            <button id="refresh-runs" class="secondary">Refresh</button>
+      <section class="thread-pane">
+        <header class="thread-header">
+          <div class="thread-title">
+            <span class="eyebrow">Agent run</span>
+            <h2>${selectedRun ? escapeHtml(selectedRun.user_input || selectedRun.id) : "New desktop task"}</h2>
           </div>
+          <div class="thread-actions">
+            ${selectedRun ? badge(selectedRun.status) : ""}
+            <button id="refresh-runtime" class="secondary-action">Runtime</button>
+          </div>
+        </header>
+
+        <section class="thread-scroll">
+          ${selectedRun ? renderRunThread(selectedRun) : renderEmptyThread()}
         </section>
 
-        <section class="content-grid">
-          <section class="panel runs-panel">
-            <div class="panel-title">
-              <h2>Runs</h2>
-            </div>
-            <div class="run-list">
-              ${runs.map((run) => html`
-                <button class="run-item ${run.id === selectedRunId ? "selected" : ""}" data-run-id="${escapeHtml(run.id)}">
-                  <span>${escapeHtml(run.user_input || run.id)}</span>
-                  ${badge(run.status)}
-                </button>
-              `).join("") || `<div class="empty">No runs yet</div>`}
-            </div>
-          </section>
-
-          <section class="panel detail-panel">
-            <div class="panel-title">
-              <h2>Run Detail</h2>
-              ${selectedRun ? badge(selectedRun.status) : ""}
-            </div>
-            ${selectedRun ? runDetail(selectedRun) : `<div class="empty">Select a run</div>`}
-          </section>
-
-          <section class="panel skills-panel">
-            <div class="panel-title">
-              <h2>Skills</h2>
-              <button id="refresh-skills" class="icon-button" title="刷新">↻</button>
-            </div>
-            <div class="skill-list">
-              ${skills.map((skill) => html`
-                <div class="skill-item">
-                  <strong>${escapeHtml(skill.name)}</strong>
-                  <span>${escapeHtml(skill.id)} @ ${escapeHtml(skill.publishedVersion || skill.latestVersion)}</span>
-                </div>
-              `).join("") || `<div class="empty">No skills loaded</div>`}
-            </div>
-          </section>
-
-          <section class="panel events-panel">
-            <div class="panel-title">
-              <h2>Events</h2>
-            </div>
-            <div class="events">
-              ${events.slice(-80).reverse().map((event) => html`
-                <div class="event">
-                  <span class="event-type">${escapeHtml(event.sequence)} ${escapeHtml(event.type)}</span>
-                  <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
-                </div>
-              `).join("") || `<div class="empty">No events</div>`}
-            </div>
-          </section>
-        </section>
+        <footer class="composer">
+          <textarea id="prompt" placeholder="${demoPrompt}"></textarea>
+          <div class="composer-bar">
+            <span>${ready ? "Runtime is ready" : "Start runtime before running a task"}</span>
+            <button id="create-run">Run</button>
+          </div>
+        </footer>
       </section>
+
+      <aside class="inspector-pane">
+        ${renderRuntimeCard(ready)}
+        ${renderConfirmationCard()}
+        ${renderModelCard()}
+        ${renderEventsCard()}
+        ${renderLogCard()}
+      </aside>
     </main>
   `;
   bindEvents();
 }
 
-function runDetail(run: RunState): string {
-  const pending = run.pending_confirmation;
+function renderEmptyThread(): string {
   return html`
-    <div class="detail-block">
-      <label>Run ID</label>
-      <code>${escapeHtml(run.id)}</code>
+    <div class="empty-thread">
+      <h3>Start with a desktop instruction</h3>
+      <p>Describe what WinPeekaboo should do on the Windows desktop. The runtime, events, and confirmation prompts stay visible on the right.</p>
     </div>
-    ${pending ? html`
-      <div class="confirmation">
-        <strong>Confirmation required</strong>
-        <pre>${escapeHtml(JSON.stringify(pending, null, 2))}</pre>
-        <div class="button-row">
-          <button id="confirm-run">Approve</button>
-          <button id="reject-run" class="danger">Reject</button>
-        </div>
+  `;
+}
+
+function renderRunThread(run: RunState): string {
+  const steps = run.steps || [];
+  return html`
+    <article class="message user-message">
+      <div class="avatar">U</div>
+      <div class="message-body">
+        <div class="message-label">User</div>
+        <p>${escapeHtml(run.user_input)}</p>
       </div>
-    ` : ""}
-    <div class="steps">
-      ${(run.steps || []).map((step) => html`
-        <div class="step">
-          <div>
-            <strong>${escapeHtml(step.name)}</strong>
-            <span>${escapeHtml((step.tool_names || []).join(", "))}</span>
-          </div>
-          ${badge(step.status)}
+    </article>
+
+    <article class="message assistant-message">
+      <div class="avatar">A</div>
+      <div class="message-body">
+        <div class="message-label">FlowPilot</div>
+        <div class="step-stack">
+          ${steps.map((step, index) => html`
+            <div class="step-row">
+              <span class="step-index">${index + 1}</span>
+              <div>
+                <strong>${escapeHtml(step.name)}</strong>
+                <span>${escapeHtml((step.tool_names || []).join(", ") || step.result || step.error || "Waiting for result")}</span>
+              </div>
+              ${badge(step.status)}
+            </div>
+          `).join("") || `<div class="pending-line">Waiting for the agent to produce steps...</div>`}
         </div>
-      `).join("")}
-    </div>
-    <label>Output</label>
-    <pre class="output">${escapeHtml(run.output || run.error || "")}</pre>
+        ${run.output || run.error ? html`
+          <pre class="run-output">${escapeHtml(run.output || run.error)}</pre>
+        ` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderRuntimeCard(ready: boolean): string {
+  return html`
+    <section class="inspector-card">
+      <div class="card-title">
+        <h3>Runtime</h3>
+        ${badge(ready ? "ready" : "offline")}
+      </div>
+      <dl class="facts">
+        <dt>Source</dt><dd>${escapeHtml(runtimeState?.source ?? "-")}</dd>
+        <dt>PID</dt><dd>${escapeHtml(runtimeState?.pid ?? "-")}</dd>
+        <dt>URL</dt><dd>${escapeHtml(runtimeState?.baseUrl ?? "-")}</dd>
+        <dt>Error</dt><dd>${escapeHtml(runtimeState?.lastError ?? "-")}</dd>
+      </dl>
+      <div class="button-row">
+        <button id="start-runtime">Start</button>
+        <button id="stop-runtime" class="secondary-action">Stop</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderConfirmationCard(): string {
+  const pending = selectedRun?.pending_confirmation;
+  if (!pending) {
+    return html`
+      <section class="inspector-card quiet">
+        <div class="card-title">
+          <h3>Confirmation</h3>
+          ${badge("clear")}
+        </div>
+        <p>No pending approval.</p>
+      </section>
+    `;
+  }
+
+  return html`
+    <section class="inspector-card attention">
+      <div class="card-title">
+        <h3>Confirmation</h3>
+        ${badge("waiting_user")}
+      </div>
+      <pre class="data-block">${escapeHtml(JSON.stringify(pending, null, 2))}</pre>
+      <div class="button-row">
+        <button id="confirm-run">Approve</button>
+        <button id="reject-run" class="danger-action">Reject</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderModelCard(): string {
+  return html`
+    <section class="inspector-card">
+      <div class="card-title">
+        <h3>Models</h3>
+        <button id="model-health" class="secondary-action">Health</button>
+      </div>
+      <pre id="model-status" class="data-block compact">${escapeHtml(modelStatus || "Not checked")}</pre>
+    </section>
+  `;
+}
+
+function renderEventsCard(): string {
+  const visibleEvents = events.slice(-12).reverse();
+  return html`
+    <section class="inspector-card grow-card">
+      <div class="card-title">
+        <h3>Events</h3>
+        <span>${visibleEvents.length}</span>
+      </div>
+      <div class="event-list">
+        ${visibleEvents.map((event) => html`
+          <div class="event-row">
+            <div>
+              <strong>${escapeHtml(event.sequence)} ${escapeHtml(event.type)}</strong>
+              <span>${escapeHtml(compactTime(event.timestamp))}</span>
+            </div>
+            <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
+          </div>
+        `).join("") || `<div class="empty-state">No events</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderLogCard(): string {
+  return html`
+    <section class="inspector-card log-card">
+      <div class="card-title">
+        <h3>Runtime log</h3>
+        <span>${runtimeLogs.length}</span>
+      </div>
+      <pre class="runtime-log">${escapeHtml(runtimeLogs.slice(-80).join("\n"))}</pre>
+    </section>
   `;
 }
 
@@ -263,6 +363,8 @@ function bindEvents(): void {
   document.querySelector("#model-health")?.addEventListener("click", checkModelHealth);
   document.querySelector("#confirm-run")?.addEventListener("click", () => confirmRun(true));
   document.querySelector("#reject-run")?.addEventListener("click", () => confirmRun(false));
+  document.querySelector("#new-run")?.addEventListener("click", resetComposer);
+  document.querySelector("#new-run-wide")?.addEventListener("click", resetComposer);
 
   document.querySelectorAll<HTMLButtonElement>(".run-item").forEach((button) => {
     button.addEventListener("click", () => {
@@ -270,6 +372,13 @@ function bindEvents(): void {
       refreshSelectedRun();
     });
   });
+}
+
+function resetComposer(): void {
+  selectedRunId = null;
+  selectedRun = null;
+  events = [];
+  render();
 }
 
 async function refreshRuntime(): Promise<void> {
@@ -294,6 +403,7 @@ async function createRun(): Promise<void> {
   if (!input) return;
   const run = await api<RunState>("/runs", "POST", { user_input: input });
   selectedRunId = run.id;
+  selectedRun = run;
   await refreshSelectedRun();
   await refreshRuns();
 }
@@ -323,14 +433,15 @@ async function confirmRun(approved: boolean): Promise<void> {
 }
 
 async function checkModelHealth(): Promise<void> {
-  const target = document.querySelector<HTMLPreElement>("#model-status");
-  if (target) target.textContent = "checking...";
+  modelStatus = "checking...";
+  render();
   try {
     const result = await api("/models/chat/health?probe=configuration", "POST");
-    if (target) target.textContent = JSON.stringify(result, null, 2);
+    modelStatus = JSON.stringify(result, null, 2);
   } catch (error) {
-    if (target) target.textContent = error instanceof Error ? error.message : String(error);
+    modelStatus = error instanceof Error ? error.message : String(error);
   }
+  render();
 }
 
 async function refreshAll(): Promise<void> {
