@@ -78,6 +78,12 @@ let runs: RunState[] = [];
 let skills: SkillSummary[] = [];
 let runtimeLogs: string[] = [];
 let modelStatus = "";
+let promptDraft = "";
+let promptSelectionStart = 0;
+let promptSelectionEnd = 0;
+let promptIsComposing = false;
+let promptWasFocused = false;
+let uiError = "";
 
 const demoPrompt = "打开记事本，输入 Hello FlowPilot";
 
@@ -120,6 +126,7 @@ function compactTime(value?: string): string {
 }
 
 function render(): void {
+  capturePromptState();
   const ready = Boolean(runtimeState?.ready);
   app.innerHTML = html`
     <main class="codex-shell">
@@ -192,10 +199,11 @@ function render(): void {
         </section>
 
         <footer class="composer">
-          <textarea id="prompt" placeholder="${demoPrompt}"></textarea>
+          <textarea id="prompt" placeholder="${demoPrompt}">${escapeHtml(promptDraft)}</textarea>
+          ${uiError ? `<div class="composer-error">${escapeHtml(uiError)}</div>` : ""}
           <div class="composer-bar">
             <span>${ready ? "Runtime is ready" : "Start runtime before running a task"}</span>
-            <button id="create-run">Run</button>
+            <button id="create-run" ${ready ? "" : "disabled"}>Run</button>
           </div>
         </footer>
       </section>
@@ -210,6 +218,7 @@ function render(): void {
     </main>
   `;
   bindEvents();
+  restorePromptState();
 }
 
 function renderEmptyThread(): string {
@@ -365,6 +374,26 @@ function bindEvents(): void {
   document.querySelector("#reject-run")?.addEventListener("click", () => confirmRun(false));
   document.querySelector("#new-run")?.addEventListener("click", resetComposer);
   document.querySelector("#new-run-wide")?.addEventListener("click", resetComposer);
+  const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
+  prompt?.addEventListener("input", () => {
+    promptDraft = prompt.value;
+    promptSelectionStart = prompt.selectionStart;
+    promptSelectionEnd = prompt.selectionEnd;
+    uiError = "";
+  });
+  prompt?.addEventListener("select", () => {
+    promptSelectionStart = prompt.selectionStart;
+    promptSelectionEnd = prompt.selectionEnd;
+  });
+  prompt?.addEventListener("compositionstart", () => {
+    promptIsComposing = true;
+  });
+  prompt?.addEventListener("compositionend", () => {
+    promptIsComposing = false;
+    promptDraft = prompt.value;
+    promptSelectionStart = prompt.selectionStart;
+    promptSelectionEnd = prompt.selectionEnd;
+  });
 
   document.querySelectorAll<HTMLButtonElement>(".run-item").forEach((button) => {
     button.addEventListener("click", () => {
@@ -378,7 +407,28 @@ function resetComposer(): void {
   selectedRunId = null;
   selectedRun = null;
   events = [];
+  uiError = "";
   render();
+}
+
+function capturePromptState(): void {
+  const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
+  if (!prompt) return;
+  promptWasFocused = document.activeElement === prompt;
+  promptDraft = prompt.value;
+  promptSelectionStart = prompt.selectionStart;
+  promptSelectionEnd = prompt.selectionEnd;
+}
+
+function restorePromptState(): void {
+  const prompt = document.querySelector<HTMLTextAreaElement>("#prompt");
+  if (!prompt) return;
+  prompt.value = promptDraft;
+  if (document.hasFocus() && (promptWasFocused || promptIsComposing)) {
+    prompt.focus();
+    prompt.setSelectionRange(promptSelectionStart, promptSelectionEnd);
+  }
+  promptWasFocused = false;
 }
 
 async function refreshRuntime(): Promise<void> {
@@ -389,6 +439,7 @@ async function refreshRuntime(): Promise<void> {
 
 async function startRuntime(): Promise<void> {
   runtimeState = await window.flowpilot.startRuntime();
+  uiError = runtimeState.lastError || "";
   render();
   await refreshAll();
 }
@@ -399,13 +450,30 @@ async function stopRuntime(): Promise<void> {
 }
 
 async function createRun(): Promise<void> {
-  const input = document.querySelector<HTMLTextAreaElement>("#prompt")?.value.trim();
+  capturePromptState();
+  const input = promptDraft.trim();
   if (!input) return;
-  const run = await api<RunState>("/runs", "POST", { user_input: input });
-  selectedRunId = run.id;
-  selectedRun = run;
-  await refreshSelectedRun();
-  await refreshRuns();
+  if (!runtimeState?.ready) {
+    uiError = runtimeState?.lastError || "Runtime is not ready";
+    render();
+    return;
+  }
+
+  try {
+    const run = await api<RunState>("/runs", "POST", { user_input: input });
+    selectedRunId = run.id;
+    selectedRun = run;
+    promptDraft = "";
+    promptSelectionStart = 0;
+    promptSelectionEnd = 0;
+    uiError = "";
+    await refreshSelectedRun();
+    await refreshRuns();
+  } catch (error) {
+    uiError = error instanceof Error ? error.message : String(error);
+    await refreshRuntime().catch(() => undefined);
+    render();
+  }
 }
 
 async function refreshRuns(): Promise<void> {

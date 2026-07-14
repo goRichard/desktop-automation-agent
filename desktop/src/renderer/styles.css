@@ -41,6 +41,13 @@ button:hover {
   background: #333;
 }
 
+button:disabled {
+  border-color: #d1ccc3;
+  background: #d8d4cc;
+  color: #77736a;
+  cursor: not-allowed;
+}
+
 textarea {
   width: 100%;
   min-height: 74px;
@@ -429,6 +436,13 @@ dd {
 
 .composer-bar {
   margin-top: 8px;
+}
+
+.composer-error {
+  margin-top: 8px;
+  color: #8a1f1f;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .inspector-card {

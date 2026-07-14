@@ -42,6 +42,13 @@ function appendRuntimeLog(message: string): void {
   mainWindow?.webContents.send("runtime:log", line);
 }
 
+function tokenMismatchMessage(): string {
+  return (
+    `Runtime on ${runtimeState.baseUrl} rejected this Electron token. ` +
+    "Stop any manually started flowpilot-runtime process on port 8765, then restart Electron."
+  );
+}
+
 function repoRoot(): string {
   return path.resolve(__dirname, "../../..");
 }
@@ -102,10 +109,7 @@ async function verifyRuntimeToken(): Promise<void> {
     }
   });
   if (response.status === 401) {
-    throw new Error(
-      `Runtime on ${runtimeState.baseUrl} rejected this Electron token. ` +
-      "Stop any manually started flowpilot-runtime process on port 8765, then restart Electron."
-    );
+    throw new Error(tokenMismatchMessage());
   }
   if (!response.ok) {
     const text = await response.text();
@@ -115,6 +119,17 @@ async function verifyRuntimeToken(): Promise<void> {
 
 async function startRuntime(): Promise<RuntimeState> {
   if (runtimeProcess && !runtimeProcess.killed) {
+    if (!runtimeState.ready) {
+      try {
+        await waitForPort(runtimePort);
+        await verifyRuntimeToken();
+        runtimeState.ready = true;
+        runtimeState.lastError = null;
+      } catch (error) {
+        runtimeState.ready = false;
+        runtimeState.lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
     return runtimeState;
   }
 
@@ -156,6 +171,12 @@ async function startRuntime(): Promise<RuntimeState> {
     runtimeState.ready = true;
   } catch (error) {
     runtimeState.lastError = error instanceof Error ? error.message : String(error);
+    runtimeState.ready = false;
+    if (runtimeProcess && !runtimeProcess.killed) {
+      runtimeProcess.kill();
+    }
+    runtimeProcess = null;
+    runtimeState.pid = null;
   }
   return runtimeState;
 }
@@ -202,11 +223,22 @@ ipcMain.handle("runtime:request", async (_event, input: {
   method?: string;
   body?: unknown;
 }) => {
+  if (!runtimeState.ready) {
+    return {
+      ok: false,
+      status: 503,
+      data: {
+        detail: runtimeState.lastError || "Runtime is not ready"
+      }
+    };
+  }
+
   const response = await fetch(`${runtimeState.baseUrl}${input.path}`, {
     method: input.method || "GET",
     headers: {
       "Content-Type": "application/json",
-      "X-Runtime-Token": runtimeToken
+      "X-Runtime-Token": runtimeToken,
+      "Authorization": `Bearer ${runtimeToken}`
     },
     body: input.body === undefined ? undefined : JSON.stringify(input.body)
   });
@@ -218,6 +250,12 @@ ipcMain.handle("runtime:request", async (_event, input: {
     data = text;
   }
   if (!response.ok) {
+    if (response.status === 401) {
+      runtimeState.ready = false;
+      runtimeState.lastError = tokenMismatchMessage();
+      mainWindow?.webContents.send("runtime:state", runtimeState);
+      return { ok: false, status: 401, data: { detail: runtimeState.lastError } };
+    }
     return { ok: false, status: response.status, data };
   }
   return { ok: true, status: response.status, data };
