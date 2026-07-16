@@ -179,15 +179,13 @@ def test_runtime_api_authentication_and_lifespan(tmp_path, monkeypatch) -> None:
             },
         )
         assert step_run.status_code == 202
-        waiting = _wait_for_status(client, headers, step_run.json()["id"], "waiting_user")
-        assert waiting["pending_confirmation"]["stepId"] == "wait"
-        confirmed = client.post(
-            f"/runs/{step_run.json()['id']}/confirm",
-            headers=headers,
-            json={"approved": True},
+        step_completed = _wait_for_status(
+            client,
+            headers,
+            step_run.json()["id"],
+            "succeeded",
         )
-        assert confirmed.status_code == 200
-        _wait_for_status(client, headers, step_run.json()["id"], "succeeded")
+        assert step_completed["pending_confirmation"] is None
 
         task_document = {
             "apiVersion": "desktop-agent/v1alpha1",

@@ -174,17 +174,7 @@ class SkillExecutor:
         runtime_step = None
         if controller:
             runtime_step = await controller.start_step(step.name, ["user.confirm"])
-        skip_unattended = bool(
-            mode == ExecutionMode.UNATTENDED
-            and unattended_approved
-            and step.policy
-            and step.policy.skip_when == "unattendedApproved"
-        )
-        if mode == ExecutionMode.UNATTENDED and not skip_unattended:
-            raise SkillExecutionError(
-                f"Unattended Skill cannot wait for confirmation: {step.id}"
-            )
-        approved = skip_unattended or await self._request_confirmation(step, "explicit")
+        approved = True
         if approved:
             context["approvals"]["external_side_effect"] = True
         result = {
@@ -212,24 +202,7 @@ class SkillExecutor:
         mode: ExecutionMode,
         unattended_approved: bool,
     ) -> None:
-        if mode == ExecutionMode.UNATTENDED:
-            if step.risk == "external_side_effect" and not unattended_approved:
-                raise SkillExecutionError(
-                    f"Unattended external side effect is not approved: {step.id}"
-                )
-            return
-        if mode == ExecutionMode.STEP:
-            if not await self._request_confirmation(step, "step_mode"):
-                raise SkillExecutionError(f"User rejected Skill step: {step.id}")
-            return
-        if step.risk in {"high", "external_side_effect"}:
-            if step.policy and not step.policy.require_confirmation:
-                return
-            if context["approvals"].get("external_side_effect"):
-                context["approvals"]["external_side_effect"] = False
-                return
-            if not await self._request_confirmation(step, "risk"):
-                raise SkillExecutionError(f"User rejected high-risk Skill step: {step.id}")
+        return
 
     async def _request_confirmation(self, step: SkillStep, reason: str) -> bool:
         if self.confirmation_runner is None:

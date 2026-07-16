@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -47,7 +45,7 @@ def test_plan_exposes_required_and_observation_tools_only() -> None:
     assert exposed == {"app_launch", "list_windows"}
 
 
-def test_tool_policy_mode_filters_unattended_tools() -> None:
+def test_tool_policy_mode_does_not_filter_unattended_tools() -> None:
     schemas = [
         {"function": {"name": "run_command"}},
         {"function": {"name": "list_windows"}},
@@ -59,43 +57,34 @@ def test_tool_policy_mode_filters_unattended_tools() -> None:
         for schema in _filter_schemas_for_tool_policy_mode(schemas, "unattended")
     }
 
-    assert exposed == {"list_windows", "write_file"}
+    assert exposed == {"run_command", "list_windows", "write_file"}
     assert _tool_mode_policy_error(
         [ToolCall("shell", "run_command", {"command": "Remove-Item x"})],
         "unattended",
-    ) == "Tool calls are not allowed in unattended mode: ['run_command']"
+    ) is None
 
 
 @pytest.mark.asyncio
-async def test_tool_confirmation_policy_waits_for_runtime_confirmation() -> None:
+async def test_tool_confirmation_policy_does_not_wait_for_runtime_confirmation() -> None:
     controller = RunController("session", "send")
     await controller.initialize()
     await controller.transition(RunStatus.PREPARING)
     await controller.transition(RunStatus.RUNNING)
 
-    request = asyncio.create_task(
-        _tool_confirmation_policy_error(
-            controller,
-            [ToolCall("send", "outlook_send_message", {"window": "Draft"})],
-            "agent",
-            allow_tool_confirmation=True,
-        )
-    )
-    await asyncio.sleep(0)
-
-    assert controller.state.status == RunStatus.WAITING_USER
-    assert controller.state.pending_confirmation["type"] == "tool_policy"
-    assert controller.state.pending_confirmation["tools"][0]["name"] == (
-        "outlook_send_message"
+    error = await _tool_confirmation_policy_error(
+        controller,
+        [ToolCall("send", "outlook_send_message", {"window": "Draft"})],
+        "agent",
+        allow_tool_confirmation=True,
     )
 
-    await controller.confirm(True)
-    assert await request is None
+    assert error is None
+    assert controller.state.pending_confirmation is None
     assert controller.state.status == RunStatus.RUNNING
 
 
 @pytest.mark.asyncio
-async def test_tool_confirmation_policy_rejects_without_confirmation_channel() -> None:
+async def test_tool_confirmation_policy_allows_without_confirmation_channel() -> None:
     controller = RunController("session", "send")
     await controller.initialize()
     await controller.transition(RunStatus.PREPARING)
@@ -108,14 +97,12 @@ async def test_tool_confirmation_policy_rejects_without_confirmation_channel() -
         allow_tool_confirmation=False,
     )
 
-    assert error == (
-        "Tool calls require explicit user confirmation: ['outlook_send_message']"
-    )
+    assert error is None
     assert controller.state.status == RunStatus.RUNNING
 
 
 @pytest.mark.asyncio
-async def test_cli_without_confirmation_allows_desktop_ui_but_blocks_dangerous_tools() -> None:
+async def test_cli_without_confirmation_allows_all_tool_risks() -> None:
     controller = RunController("session", "desktop")
     await controller.initialize()
     await controller.transition(RunStatus.PREPARING)
@@ -139,7 +126,7 @@ async def test_cli_without_confirmation_allows_desktop_ui_but_blocks_dangerous_t
         "agent",
         allow_tool_confirmation=False,
     )
-    assert shell_error == "Tool calls require explicit user confirmation: ['run_command']"
+    assert shell_error is None
 
     import tools.scheduler_tool  # noqa: F401
 
@@ -149,7 +136,7 @@ async def test_cli_without_confirmation_allows_desktop_ui_but_blocks_dangerous_t
         "agent",
         allow_tool_confirmation=False,
     )
-    assert scheduler_error == "Tool calls require explicit user confirmation: ['toggle_job']"
+    assert scheduler_error is None
 
 
 def test_observation_does_not_complete_required_plan_action() -> None:

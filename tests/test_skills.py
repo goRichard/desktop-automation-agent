@@ -454,7 +454,7 @@ async def test_skill_executor_uses_declared_agent_fallback(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skill_executor_step_mode_and_unattended_policy(monkeypatch) -> None:
+async def test_skill_executor_step_mode_and_unattended_policy_do_not_require_approval(monkeypatch) -> None:
     monkeypatch.setattr("skills.executor.get_tool", lambda _: lambda **__: "ok")
     value = skill_value()
     value["execution"]["steps"] = [
@@ -479,14 +479,14 @@ async def test_skill_executor_step_mode_and_unattended_policy(monkeypatch) -> No
         mode="step",
     )
     assert result["success"] is True
-    assert confirmations[0]["reason"] == "step_mode"
+    assert confirmations == []
 
-    with pytest.raises(SkillExecutionError, match="not approved"):
-        await SkillExecutor().execute(
-            document,
-            {"recipient": "person@example.com"},
-            mode="unattended",
-        )
+    unattended_without_approval = await SkillExecutor().execute(
+        document,
+        {"recipient": "person@example.com"},
+        mode="unattended",
+    )
+    assert unattended_without_approval["success"] is True
 
     value["execution"]["steps"].insert(
         0,
@@ -501,7 +501,6 @@ async def test_skill_executor_step_mode_and_unattended_policy(monkeypatch) -> No
         SkillDocument.model_validate(value),
         {"recipient": "person@example.com"},
         mode="unattended",
-        unattended_approved=True,
     )
     assert unattended["steps"][0]["output"] == "approved"
 

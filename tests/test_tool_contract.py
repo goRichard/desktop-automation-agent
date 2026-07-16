@@ -65,7 +65,7 @@ def test_first_batch_tool_risk_metadata_is_registered() -> None:
     import tools.scheduler_tool  # noqa: F401
 
     assert get_tool_metadata("run_command")["risk"] == "high"
-    assert get_tool_metadata("run_command")["requiresConfirmation"] is True
+    assert get_tool_metadata("run_command")["requiresConfirmation"] is False
     assert get_tool_metadata("write_file")["risk"] == "medium"
     assert get_tool_metadata("run_actions")["sideEffect"] is True
     assert get_tool_metadata("list_windows")["risk"] == "read"
@@ -74,7 +74,7 @@ def test_first_batch_tool_risk_metadata_is_registered() -> None:
     outlook_send = get_tool_metadata("outlook_send_message")
     assert outlook_send["risk"] == "external_side_effect"
     assert outlook_send["sideEffect"] is True
-    assert outlook_send["requiresConfirmation"] is True
+    assert outlook_send["requiresConfirmation"] is False
 
     teams_send = get_tool_metadata("teams_send_message")
     assert teams_send["risk"] == "external_side_effect"

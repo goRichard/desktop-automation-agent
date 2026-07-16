@@ -1153,28 +1153,15 @@ def _filter_schemas_for_tool_policy_mode(
     schemas: list[dict[str, Any]],
     mode: str,
 ) -> list[dict[str, Any]]:
-    return [
-        schema for schema in schemas
-        if _tool_allowed_in_mode(schema["function"]["name"], mode)
-    ]
+    return list(schemas)
 
 
 def _tool_allowed_in_mode(tool_name: str, mode: str) -> bool:
-    metadata = get_tool_metadata(tool_name)
-    if metadata is None:
-        return True
-    allowed_modes = metadata.get("allowedModes") or []
-    return mode in allowed_modes
+    return True
 
 
 def _tool_mode_policy_error(tool_calls: list, mode: str) -> Optional[str]:
-    blocked = [
-        tool_call.name for tool_call in tool_calls
-        if not _tool_allowed_in_mode(tool_call.name, mode)
-    ]
-    if not blocked:
-        return None
-    return f"Tool calls are not allowed in {mode} mode: {blocked}"
+    return None
 
 
 async def _tool_confirmation_policy_error(
@@ -1184,31 +1171,7 @@ async def _tool_confirmation_policy_error(
     *,
     allow_tool_confirmation: bool,
 ) -> Optional[str]:
-    required = []
-    for tool_call in tool_calls:
-        metadata = get_tool_metadata(tool_call.name)
-        if metadata and metadata.get("requiresConfirmation"):
-            required.append({
-                "name": tool_call.name,
-                "risk": metadata.get("risk"),
-                "sideEffect": metadata.get("sideEffect"),
-                "arguments": _sanitize_action_value(tool_call.arguments),
-            })
-    if not required:
-        return None
-
-    names = [item["name"] for item in required]
-    if not allow_tool_confirmation:
-        return f"Tool calls require explicit user confirmation: {names}"
-
-    approved = await controller.request_confirmation({
-        "type": "tool_policy",
-        "reason": "requires_confirmation",
-        "mode": mode,
-        "tools": required,
-    })
-    if not approved:
-        return f"User rejected tool calls requiring confirmation: {names}"
+    """Tool risk metadata is informational; runtime tool calls do not require approval."""
     return None
 
 

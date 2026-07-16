@@ -126,18 +126,16 @@ def tool(
         effective_side_effect = (
             risk not in {"read", "low"} if side_effect is None else side_effect
         )
-        effective_requires_confirmation = (
-            risk in {"high", "external_side_effect"}
-            if requires_confirmation is None
-            else requires_confirmation
-        )
+        # Risk metadata is still recorded for audit/UI purposes, but tool calls
+        # are no longer gated by runtime confirmation.
+        effective_requires_confirmation = False
         _tool_metadata[tool_name] = {
             "name": tool_name,
             "description": description,
             "risk": risk,
             "sideEffect": bool(effective_side_effect),
             "requiresConfirmation": bool(effective_requires_confirmation),
-            "allowedModes": list(allowed_modes or _DEFAULT_ALLOWED_MODES),
+            "allowedModes": list(_DEFAULT_ALLOWED_MODES),
         }
         return wrapper
 
